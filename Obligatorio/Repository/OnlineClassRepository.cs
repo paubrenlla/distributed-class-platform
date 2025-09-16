@@ -7,34 +7,34 @@ namespace Repository
 {
     public class OnlineClassRepository
     {
-        private readonly List<ClaseOnline> _clases = new List<ClaseOnline>();
+        private readonly List<OnlineClass> _clases = new List<OnlineClass>();
 
-        public ClaseOnline Add(ClaseOnline clase)
+        public OnlineClass Add(OnlineClass clase)
         {
             if (clase == null) throw new ArgumentNullException(nameof(clase));
             _clases.Add(clase);
             return clase;
         }
 
-        public ClaseOnline GetById(int id)
+        public OnlineClass GetById(int id)
         {
             return _clases.FirstOrDefault(c => c.Id == id);
         }
 
-        public List<ClaseOnline> GetAll()
+        public List<OnlineClass> GetAll()
         {
-            return new List<ClaseOnline>(_clases);
+            return new List<OnlineClass>(_clases);
         }
 
-        public List<ClaseOnline> SearchByKeyword(string keyword)
+        public List<OnlineClass> SearchByKeyword(string keyword)
         {
             return _clases
-                .Where(c => c.Nombre.Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
-                            c.Descripcion.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                .Where(c => c.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
+                            c.Description.Contains(keyword, StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
 
-        public void Update(ClaseOnline clase)
+        public void Update(OnlineClass clase)
         {
             var existing = GetById(clase.Id);
             if (existing == null) throw new InvalidOperationException("Clase no encontrada");
