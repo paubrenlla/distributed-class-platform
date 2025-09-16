@@ -14,7 +14,7 @@ namespace Domain
         public string Password { get; private set; }
         public DateTime CreatedAt { get; private set; }
         public bool Activo { get; private set; }
-        public Usuario(string username, string password, string displayName = null)
+        public User(string username, string password, string displayName = null)
         {
             if (string.IsNullOrWhiteSpace(username)) throw new ArgumentException("username es requerido", nameof(username));
             if (string.IsNullOrWhiteSpace(password)) throw new ArgumentException("password es requerido", nameof(password));
@@ -44,7 +44,7 @@ namespace Domain
 
         public override bool Equals(object obj)
         {
-            if (obj is Usuario other)
+            if (obj is User other)
             {
                 return string.Equals(this.Username, other.Username, StringComparison.OrdinalIgnoreCase);
             }
@@ -57,4 +57,4 @@ namespace Domain
         }
     }
 }
-}
+

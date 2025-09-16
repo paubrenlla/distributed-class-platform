@@ -7,9 +7,9 @@ namespace Repository
 {
     public class UserRepository
     {
-        private readonly List<Usuario> _usuarios = new List<Usuario>();
+        private readonly List<User> _usuarios = new List<User>();
 
-        public Usuario Add(Usuario usuario)
+        public User Add(User usuario)
         {
             if (usuario == null) throw new ArgumentNullException(nameof(usuario));
             if (_usuarios.Any(u => u.Username == usuario.Username))
@@ -19,22 +19,22 @@ namespace Repository
             return usuario;
         }
 
-        public Usuario GetById(int id)
+        public User GetById(int id)
         {
             return _usuarios.FirstOrDefault(u => u.Id == id);
         }
 
-        public Usuario GetByUsername(string username)
+        public User GetByUsername(string username)
         {
             return _usuarios.FirstOrDefault(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
         }
 
-        public List<Usuario> GetAll()
+        public List<User> GetAll()
         {
-            return new List<Usuario>(_usuarios);
+            return new List<User>(_usuarios);
         }
 
-        public void Update(Usuario usuario)
+        public void Update(User usuario)
         {
             var existing = GetById(usuario.Id);
             if (existing == null) throw new InvalidOperationException("Usuario no encontrado");
