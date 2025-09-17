@@ -13,6 +13,7 @@ namespace Server
     {
         static UserRepository userRepo = new UserRepository();
         static readonly OnlineClassRepository classRepo = new OnlineClassRepository();
+        static readonly InscriptionRepository inscriptionRepo = new InscriptionRepository();
         
         static void Main(string[] args)
         {
@@ -84,7 +85,6 @@ namespace Server
                     
             switch (frame.Command)
             {
-                // Añadimos el nuevo comando para crear usuarios
                 case ProtocolConstants.CommandCreateUser:
                     try
                     {
@@ -93,7 +93,7 @@ namespace Server
                         if (parts.Length < 2) throw new Exception("Formato incorrecto. Se esperaba 'usuario|clave'.");
 
                         var user = new User(parts[0], parts[1]);
-                        userRepo.Add(user); // Aquí no usamos lock, como acordamos.
+                        userRepo.Add(user);
                         
                         responseMessage = $"OK|Usuario '{parts[0]}' creado exitosamente.";
                     }
@@ -118,7 +118,7 @@ namespace Server
                         var user = userRepo.GetByUsername(parts[0]);
                         if (user != null && user.VerificarPassword(parts[1]))
                         {
-                            loggedInUser = user; // ¡Éxito! Guardamos el usuario en el estado de la conexión.
+                            loggedInUser = user;
                             responseMessage = $"OK|Bienvenido, {user.Username}!";
                         }
                         else
@@ -133,59 +133,89 @@ namespace Server
                     break;
                     
                 case ProtocolConstants.CommandListClasses:
-            if (loggedInUser == null)
-            {
-                responseMessage = "ERR|Debes iniciar sesión para ver las clases.";
-                break;
-            }
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para ver las clases.";
+                        break;
+                    }
 
-            var allClasses = classRepo.GetAll();
-            if (allClasses.Count == 0)
-            {
-                responseMessage = "OK|No hay clases disponibles por el momento.";
-            }
-            else
-            {
-                // Serializamos la lista de clases a nuestro formato
-                var stringBuilder = new System.Text.StringBuilder();
-                stringBuilder.Append("OK|");
-                foreach (var onlineClass in allClasses)
-                {
-                    stringBuilder.Append($"{onlineClass.Id}|{onlineClass.Name}|{onlineClass.Registered.Count}|{onlineClass.MaxCapacity}|{onlineClass.Image != null}\n");
-                }
-                responseMessage = stringBuilder.ToString().TrimEnd('\n');
-            }
-            break;
+                    var allClasses = classRepo.GetAll();
+                    if (allClasses.Count == 0)
+                    {
+                        responseMessage = "OK|No hay clases disponibles por el momento.";
+                    }
+                    else
+                    {
+                        var stringBuilder = new System.Text.StringBuilder();
+                        stringBuilder.Append("OK|");
+                        foreach (var onlineClass in allClasses)
+                        {
+                            var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(onlineClass.Id).Count;
+                            stringBuilder.Append($"{onlineClass.Id}|{onlineClass.Name}|{occupiedSlots}|{onlineClass.MaxCapacity}|{onlineClass.Image != null}\n");
+                        }
+                        responseMessage = stringBuilder.ToString().TrimEnd('\n');
+                    }
+                    break;
 
-        case ProtocolConstants.CommandCreateClass:
-            if (loggedInUser == null)
-            {
-                responseMessage = "ERR|Debes iniciar sesión para crear una clase.";
-                break;
-            }
-            try
-            {
-                // Deserializamos los datos enviados por el cliente
-                string payload = Encoding.UTF8.GetString(frame.Data);
-                var parts = payload.Split('|');
-                if (parts.Length < 4) throw new Exception("Datos incompletos para crear la clase.");
+                case ProtocolConstants.CommandCreateClass:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para crear una clase.";
+                        break;
+                    }
+                    try
+                    {
+                        string payload = Encoding.UTF8.GetString(frame.Data);
+                        var parts = payload.Split('|');
+                        if (parts.Length < 4) throw new Exception("Datos incompletos para crear la clase.");
 
-                string name = parts[0];
-                string description = parts[1];
-                int maxCapacity = int.Parse(parts[2]);
-                int duration = int.Parse(parts[3]);
-                
-                var newClass = new OnlineClass(name, description, maxCapacity, DateTime.Now, duration, loggedInUser);
-                classRepo.Add(newClass);
+                        string name = parts[0];
+                        string description = parts[1];
+                        int maxCapacity = int.Parse(parts[2]);
+                        int duration = int.Parse(parts[3]);
+                        
+                        var newClass = new OnlineClass(name, description, maxCapacity, DateTime.Now, duration, loggedInUser);
+                        classRepo.Add(newClass);
 
-                responseMessage = $"OK|Clase '{name}' creada con éxito con el ID: {newClass.Id}";
-            }
-            catch (Exception ex)
-            {
-                responseMessage = $"ERR|{ex.Message}";
-            }
-            break;
-                    
+                        responseMessage = $"OK|Clase '{name}' creada con éxito con el ID: {newClass.Id}";
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+                    break;
+                case ProtocolConstants.CommandSubscribeToClass:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para inscribirte.";
+                        break;
+                    }
+                    try
+                    {
+                        int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                        var classToJoin = classRepo.GetById(classId);
+                        if (classToJoin == null) throw new Exception("La clase no existe.");
+
+                        // Verificamos si ya está inscrito
+                        if(inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId) != null)
+                            throw new Exception("Ya estás inscrito en esta clase.");
+
+                        // Verificamos cupos
+                        var activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId);
+                        if(activeInscriptions.Count >= classToJoin.MaxCapacity)
+                            throw new Exception("La clase no tiene cupos disponibles.");
+
+                        var newInscription = new Inscription(loggedInUser, classToJoin);
+                        inscriptionRepo.Add(newInscription);
+
+                        responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+
+                    break;
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
                     break;
