@@ -15,8 +15,13 @@ namespace Server
         static readonly OnlineClassRepository classRepo = new OnlineClassRepository();
         static readonly InscriptionRepository inscriptionRepo = new InscriptionRepository();
         
+        static Program()
+        {
+            SeedData();
+        }
         static void Main(string[] args)
         {
+            Console.WriteLine("Server starting with preloaded data...");
             Console.WriteLine("Starting Server Application..");
 
             Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -360,6 +365,41 @@ namespace Server
                 Command = frame.Command,
                 Data = responseData
             };
+        }
+        private static void SeedData()
+        {
+            try
+            {
+                Console.WriteLine("Seeding initial data...");
+
+                // Creación de Usuarios
+                var pau = new User("pau", "pau");
+                var teo = new User("teo", "teo");
+                var romi = new User("romi", "romi");
+                userRepo.Add(pau);
+                userRepo.Add(teo);
+                userRepo.Add(romi);
+                Console.WriteLine("Users created: pau, teo, romi");
+
+                // Creación de Clases
+                // Creador para todas las clases será "pau"
+                var classPast = new OnlineClass("Clase 1", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
+                var classSoon = new OnlineClass("Clase 2", "Charla sobre IA", 5, DateTimeOffset.Now.AddDays(2), 120, pau);
+                var classFuture = new OnlineClass("Clase 3", "Fundamentos de computacion", 20, DateTimeOffset.Now.AddYears(1), 180, pau);
+                classRepo.Add(classPast);
+                classRepo.Add(classSoon);
+                classRepo.Add(classFuture);
+                Console.WriteLine("Classes created.");
+                
+                Console.WriteLine("No inscriptions where created");
+
+                Console.WriteLine("Data seeding finished successfully.");
+            }
+            catch (Exception e)
+            {
+                // Este catch es por si intentas agregar un usuario que ya existe, para que el servidor no se caiga.
+                Console.WriteLine($"Error during data seeding: {e.Message}");
+            }
         }
     }
 }
