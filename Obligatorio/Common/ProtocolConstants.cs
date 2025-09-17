@@ -22,6 +22,8 @@ public static class ProtocolConstants
     public const short CommandCreateClass = 10;
     public const short CommandListClasses = 11;
     public const short CommandSubscribeToClass = 12;
+    public const short CommandCancelSubscription = 13;
+    public const short CommandShowHistory = 14;
     
     // Agrega aquí más comandos a medida que los necesites...
 }

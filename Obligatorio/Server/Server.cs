@@ -151,7 +151,7 @@ namespace Server
                         foreach (var onlineClass in allClasses)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(onlineClass.Id).Count;
-                            stringBuilder.Append($"{onlineClass.Id}|{onlineClass.Name}|{occupiedSlots}|{onlineClass.MaxCapacity}|{onlineClass.Image != null}\n");
+                            stringBuilder.Append($"{onlineClass.Id}|{onlineClass.Name}|{onlineClass.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{onlineClass.MaxCapacity}|{onlineClass.Image != null}\n");
                         }
                         responseMessage = stringBuilder.ToString().TrimEnd('\n');
                     }
@@ -173,11 +173,17 @@ namespace Server
                         string description = parts[1];
                         int maxCapacity = int.Parse(parts[2]);
                         int duration = int.Parse(parts[3]);
+                        DateTimeOffset startDate = DateTimeOffset.Parse(parts[4]);
+
                         
-                        var newClass = new OnlineClass(name, description, maxCapacity, DateTime.Now, duration, loggedInUser);
+                        var newClass = new OnlineClass(name, description, maxCapacity, startDate, duration, loggedInUser);
                         classRepo.Add(newClass);
 
                         responseMessage = $"OK|Clase '{name}' creada con éxito con el ID: {newClass.Id}";
+                    }
+                    catch (FormatException)
+                    {
+                        responseMessage = "ERR|El formato de la fecha es incorrecto. Use AAAA-MM-DD HH:MM";
                     }
                     catch (Exception ex)
                     {
@@ -214,7 +220,61 @@ namespace Server
                     {
                         responseMessage = $"ERR|{ex.Message}";
                     }
+                    break;
+                case ProtocolConstants.CommandCancelSubscription:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para cancelar una inscripción.";
+                        break;
+                    }
+                    try
+                    {
+                        int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                        
+                        // Buscamos la inscripción activa del usuario en esa clase
+                        var inscription = inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId);
+                        if (inscription == null) 
+                            throw new Exception("No estás inscrito en esta clase.");
 
+                        // Verificamos la regla de los 2 minutos de antelación [cite: 69]
+                        var remainingTime = inscription.Class.StartDate - DateTimeOffset.UtcNow;
+                        if (remainingTime.TotalMinutes < 2)
+                            throw new InvalidOperationException("No se puede cancelar la inscripción con menos de 2 minutos de antelación.");
+
+                        inscription.Cancel();
+                        
+                        responseMessage = $"OK|Tu inscripción a la clase '{inscription.Class.Name}' ha sido cancelada.";
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+                    break;
+
+                case ProtocolConstants.CommandShowHistory:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para ver tu historial.";
+                        break;
+                    }
+                    
+                    var userInscriptions = inscriptionRepo.GetByUser(loggedInUser.Id);
+                    if (userInscriptions.Count == 0)
+                    {
+                        responseMessage = "OK|No tienes actividad en tu historial.";
+                    }
+                    else
+                    {
+                        // Serializamos el historial para enviarlo al cliente
+                        // Formato: NombreClase|FechaClase|EstadoInscripcion
+                        var stringBuilder = new System.Text.StringBuilder();
+                        stringBuilder.Append("OK|");
+                        foreach (var insp in userInscriptions)
+                        {
+                            stringBuilder.Append($"{insp.Class.Name}|{insp.Class.StartDate:dd/MM/yyyy HH:mm}|{insp.Status}\n");
+                        }
+                        responseMessage = stringBuilder.ToString().TrimEnd('\n');
+                    }
                     break;
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
