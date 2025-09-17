@@ -126,8 +126,8 @@ namespace Client
                         {
                            responseData = Encoding.UTF8.GetString(serverResponse.Data);
                         }
-                        
-                        Console.WriteLine($"-> Server Response (CMD {serverResponse.Command}): {responseData}");
+
+                        ProcessServerResponse(responseData, serverResponse.Command);
                     }
                 }
                 catch (Exception e)
@@ -142,32 +142,42 @@ namespace Client
             clientSocket.Close();
         }
         
-        static void ProcessServerResponse(string response)
+        static void ProcessServerResponse(string response, short command)
         {
             var parts = response.Split(new[] { '|' }, 2);
             var status = parts[0];
             var data = parts.Length > 1 ? parts[1] : string.Empty;
 
             Console.WriteLine($"-> Status: {status}");
-            if (!string.IsNullOrEmpty(data))
+
+            if (command == ProtocolConstants.CommandListClasses && status == "OK")
             {
-                // Si la respuesta es una lista de clases, la formateamos
-                if (response.Contains("\n")) 
+                if (string.IsNullOrEmpty(data) || !data.Contains("|"))
                 {
-                    var classLines = data.Split('\n');
-                    Console.WriteLine("  ID | Nombre de la Clase | Cupos | ¿Tiene Portada?");
-                    Console.WriteLine("  ---|--------------------|-------|----------------");
-                    foreach (var line in classLines)
-                    {
-                        var classData = line.Split('|');
-                        // Formato: Id|Nombre|CuposOcupados|CupoMaximo|TieneImagen
-                        Console.WriteLine($"  {classData[0],-2} | {classData[1],-18} | {classData[2]}/{classData[3],-4} | {classData[4]}");
-                    }
+                    // Si no hay datos de clases, lo tratamos como un mensaje simple.
+                    Console.WriteLine($"   Message: {data}");
                 }
                 else
                 {
-                    Console.WriteLine($"   Message: {data}");
+                    // Si hay datos, imprimimos la tabla completa.
+                    var classLines = data.Split('\n');
+                    Console.WriteLine("  ID | Nombre            | Cupos   | Portada");
+                    Console.WriteLine("  ---|-------------------|---------|---------");
+                    foreach (var line in classLines)
+                    {
+                        if (string.IsNullOrEmpty(line)) continue;
+                        var classData = line.Split('|');
+                        if (classData.Length >= 5)
+                        {
+                            string cupos = $"{classData[2]}/{classData[3]}";
+                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {cupos,-7} | {classData[4]}");
+                        }
+                    }
                 }
+            }
+            else
+            {
+                Console.WriteLine($"   Message: {data}");
             }
         }
     }
