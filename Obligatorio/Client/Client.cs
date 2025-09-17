@@ -33,13 +33,13 @@ namespace Client
 
             while (clientRunning)
             {
-                Console.WriteLine("\nType a command (create/login/listclasses/createclass/exit):");
+                Console.WriteLine("\nType a command (create/login/listclasses/createclass/subscribe/exit):");
                 var input = Console.ReadLine()?.Trim().ToLower();
 
                 if (input == "exit")
                 {
                     clientRunning = false;
-                    continue; // Salta al final del bucle para cerrar la conexión
+                    continue;
                 }
 
                 Frame requestFrame = null;
@@ -106,6 +106,17 @@ namespace Client
                                 Header = ProtocolConstants.Request,
                                 Command = ProtocolConstants.CommandCreateClass,
                                 Data = Encoding.UTF8.GetBytes(payload)
+                            };
+                            break;
+                        case "subscribe":
+                            Console.Write("Ingresa el ID de la clase a la que quieres inscribirte: ");
+                            string classId = Console.ReadLine();
+    
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandSubscribeToClass,
+                                Data = Encoding.UTF8.GetBytes(classId)
                             };
                             break;
                         default:
