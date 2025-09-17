@@ -276,6 +276,78 @@ namespace Server
                         responseMessage = stringBuilder.ToString().TrimEnd('\n');
                     }
                     break;
+                case ProtocolConstants.CommandModifyClass:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para modificar una clase.";
+                        break;
+                    }
+                    try
+                    {
+                        // Formato esperado: IDClase|NuevoNombre|NuevaDesc|NuevoCupo|NuevaDuracion|NuevaFecha
+                        string payload = Encoding.UTF8.GetString(frame.Data);
+                        var parts = payload.Split('|');
+                        if (parts.Length < 6) throw new Exception("Datos incompletos para modificar la clase.");
+
+                        int classId = int.Parse(parts[0]);
+                        var classToModify = classRepo.GetById(classId);
+                        if (classToModify == null) throw new Exception("La clase no existe.");
+                        
+                        // ¡AUTORIZACIÓN! Verificamos que el usuario logueado sea el creador.
+                        if (classToModify.Creator.Id != loggedInUser.Id)
+                            throw new Exception("No tienes permiso para modificar esta clase.");
+
+                        // Parseamos los nuevos datos
+                        string newName = parts[1];
+                        string newDesc = parts[2];
+                        int newCapacity = int.Parse(parts[3]);
+                        int newDuration = int.Parse(parts[4]);
+                        DateTimeOffset newDate = DateTimeOffset.Parse(parts[5]);
+                        
+                        // Usamos el método del dominio para modificar la clase
+                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, null); // Pasamos null para la imagen por ahora
+                        
+                        responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+                    break;
+
+                case ProtocolConstants.CommandDeleteClass:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para eliminar una clase.";
+                        break;
+                    }
+                    try
+                    {
+                        int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                        var classToDelete = classRepo.GetById(classId);
+                        if (classToDelete == null) throw new Exception("La clase no existe.");
+
+                        // ¡AUTORIZACIÓN!
+                        if (classToDelete.Creator.Id != loggedInUser.Id)
+                            throw new Exception("No tienes permiso para eliminar esta clase.");
+                        
+                        // Verificamos si hay inscriptos 
+                        if (inscriptionRepo.GetActiveClassByClassId(classId).Any())
+                            throw new Exception("No se puede eliminar una clase con usuarios inscriptos.");
+
+                        // La clase de dominio ya verifica si ha comenzado o no
+                        classToDelete.Eliminar(); 
+                        
+                        // Si todas las validaciones pasan, la eliminamos del repositorio
+                        classRepo.Delete(classId);
+
+                        responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+                    break;
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
                     break;
