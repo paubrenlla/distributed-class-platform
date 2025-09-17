@@ -18,14 +18,16 @@ namespace Server
             Console.WriteLine("Starting Server Application..");
 
             Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000); //esto deberia ser 0 en vez de 5000?
+            // TODO: Leer IP y Puerto desde un archivo de configuración
+            IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000); 
 
             serverSocket.Bind(serverEndpoint);
-            serverSocket.Listen();
+            serverSocket.Listen(10); // Escucha hasta 10 clientes en cola
 
             Console.WriteLine("Waiting for clients to connect...");
 
-            while (true) //Ver como hacer para cerrar el server o dejar de acpetar clientes
+            // TODO: Implementar un mecanismo de cierre controlado
+            while (true) 
             {
                 Socket clientSocket = serverSocket.Accept();
                 Thread t = new Thread(() => HandleClient(clientSocket));
@@ -38,24 +40,21 @@ namespace Server
             Console.WriteLine("Client connected: " + clientSocket.RemoteEndPoint);
             bool clientActive = true;
             NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
+    
+            // Esta variable mantendrá el estado para esta conexión de cliente específica.
+            User loggedInUser = null; 
 
             while (clientActive)
             {
                 try
                 {
-                    // Leer largo (2 bytes)
-                    byte[] messageLengthBuffer = networkDataHelper.Receive(2);
-                    ushort messageLength = BitConverter.ToUInt16(messageLengthBuffer);
+                    Frame receivedFrame = networkDataHelper.Receive();
+                    Console.WriteLine($"Client sent command: {receivedFrame.Command}");
 
-                    // Leer mensaje
-                    byte[] buffer = networkDataHelper.Receive(messageLength);
-                    string message = Encoding.UTF8.GetString(buffer);
-
-                    Console.WriteLine($"Client sent: {message}");
-
-                    // Procesar comando simple: CREATE_USER|username|password|displayName
-                    string response = ProcessCommand(message);
-                    SendResponse(networkDataHelper, response);
+                    // Pasamos 'loggedInUser' por referencia para que ProcessCommand pueda modificarlo.
+                    Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser); 
+            
+                    networkDataHelper.Send(responseFrame);
                 }
                 catch (SocketException)
                 {
@@ -63,13 +62,8 @@ namespace Server
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Error processing client: " + ex.Message);
-                    try
-                    {
-                        SendResponse(new NetworkDataHelper(clientSocket), "ERR|Server error: " + ex.Message);
-                    }
-                    catch { }
-                    clientActive = false;
+                    Console.WriteLine("Error processing client request: " + ex.Message);
+                    clientActive = false; 
                 }
             }
 
@@ -79,58 +73,86 @@ namespace Server
                 clientSocket.Shutdown(SocketShutdown.Both);
                 clientSocket.Close();
             }
-            catch { }
+            catch {}
         }
 
-        static string ProcessCommand(string message)
+        static Frame ProcessCommand(Frame frame, ref User loggedInUser) 
         {
-            if (string.IsNullOrWhiteSpace(message)) return "ERR|Empty message";
-
-            var parts = message.Split('|');
-            var cmd = parts[0].ToUpperInvariant();
-
-            if (cmd == "CREATE_USER")
+            byte[] responseData;
+            string responseMessage;
+                    
+            switch (frame.Command)
             {
-                // Esperamos al menos 3 partes: CREATE_USER|username|password (displayName opcional)
-                if (parts.Length < 3) return "ERR|CREATE_USER requires username and password";
+                // Añadimos el nuevo comando para crear usuarios
+                case ProtocolConstants.CommandCreateUser:
+                    try
+                    {
+                        string payload = Encoding.UTF8.GetString(frame.Data); // "usuario|clave"
+                        var parts = payload.Split('|');
+                        if (parts.Length < 2) throw new Exception("Formato incorrecto. Se esperaba 'usuario|clave'.");
 
-                string username = parts[1].Trim();
-                string password = parts[2].Trim();
-                string displayName = parts.Length >= 4 ? parts[3].Trim() : username;
+                        var user = new User(parts[0], parts[1]);
+                        userRepo.Add(user); // Aquí no usamos lock, como acordamos.
+                        
+                        responseMessage = $"OK|Usuario '{parts[0]}' creado exitosamente.";
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+                    break;
 
-                try
-                {
-                    var usuario = new User(username, password, displayName);
-                    userRepo.Add(usuario);
-                    Console.WriteLine($"Usuario creado: {usuario.Username} (id={usuario.Id})");
-                    return $"OK|{usuario.Id}";
-                }
-                catch (Exception ex)
-                {
-                    return $"ERR|{ex.Message}";
-                }
+                case ProtocolConstants.CommandLogin:
+                    if (loggedInUser != null)
+                    {
+                        responseMessage = $"ERR|Ya has iniciado sesión como '{loggedInUser.Username}'.";
+                        break;
+                    }
+                    try
+                    {
+                        string credentials = Encoding.UTF8.GetString(frame.Data); // "usuario|clave"
+                        var parts = credentials.Split('|');
+                        if (parts.Length < 2) throw new Exception("Formato incorrecto. Se esperaba 'usuario|clave'.");
+
+                        var user = userRepo.GetByUsername(parts[0]);
+                        if (user != null && user.VerificarPassword(parts[1]))
+                        {
+                            loggedInUser = user; // ¡Éxito! Guardamos el usuario en el estado de la conexión.
+                            responseMessage = $"OK|Bienvenido, {user.Username}!";
+                        }
+                        else
+                        {
+                            responseMessage = "ERR|Usuario o contraseña incorrectos.";
+                        }
+                    }
+                    catch(Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+                    break;
+                    
+                case ProtocolConstants.CommandListClasses:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para ver las clases.";
+                        break;
+                    }
+                    // Lógica para listar clases... por ahora un placeholder.
+                    responseMessage = $"OK|Hola {loggedInUser.Username}, aquí está la lista de clases: [...]";
+                    break;
+                    
+                default:
+                    responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
+                    break;
             }
-
-            // Podés agregar más comandos aquí (GET_USER, LIST_USERS, DELETE_USER, etc.)
-            if (cmd == "LIST_USERS")
+            
+            responseData = Encoding.UTF8.GetBytes(responseMessage);
+            return new Frame
             {
-                var all = userRepo.GetAll();
-                // armar respuesta simple separada por ';' cada usuario "id:username"
-                var list = string.Join(";", all.ConvertAll(u => $"{u.Id}:{u.Username}"));
-                return $"OK|{list}";
-            }
-
-            return "ERR|Unknown command";
-        }
-
-        static void SendResponse(NetworkDataHelper helper, string response)
-        {
-            byte[] responseBytes = Encoding.UTF8.GetBytes(response);
-            ushort respLen = (ushort)responseBytes.Length;
-            byte[] respLenBytes = BitConverter.GetBytes(respLen);
-
-            helper.Send(respLenBytes);
-            helper.Send(responseBytes);
+                Header = ProtocolConstants.Response,
+                Command = frame.Command,
+                Data = responseData
+            };
         }
     }
 }
