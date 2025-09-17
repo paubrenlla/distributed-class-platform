@@ -34,6 +34,7 @@ namespace Client
             while (clientRunning)
             {
                 Console.WriteLine("\nType a command (create/login/listclasses/createclass/subscribe/cancel/history/availableclasses/searchclasses/exit):");
+
                 var input = Console.ReadLine()?.Trim().ToLower();
 
                 if (input == "exit")
@@ -132,7 +133,6 @@ namespace Client
                                 Data = Encoding.UTF8.GetBytes(classIdToCancel)
                             };
                             break;
-
                         case "history":
                             requestFrame = new Frame
                             {
@@ -141,6 +141,7 @@ namespace Client
                                 Data = null 
                             };
                             break;
+ 
                         case "availableclasses":
                             requestFrame = new Frame
                             {
@@ -197,6 +198,43 @@ namespace Client
                                 requestFrame = searchFrame;
                             break;
 
+
+                        case "modify":
+                            Console.Write("Ingresa el ID de la clase a modificar: ");
+                            string modId = Console.ReadLine();
+                            Console.Write("Nuevo nombre: ");
+                            string modName = Console.ReadLine();
+                            Console.Write("Nueva descripción: ");
+                            string modDesc = Console.ReadLine();
+                            Console.Write("Nuevo cupo: ");
+                            string modCap = Console.ReadLine();
+                            Console.Write("Nueva duración (min): ");
+                            string modDur = Console.ReadLine();
+                            Console.Write("Nueva fecha (AAAA-MM-DD HH:MM): ");
+                            string modDate = Console.ReadLine();
+
+                            string modPayload = $"{modId}|{modName}|{modDesc}|{modCap}|{modDur}|{modDate}";
+    
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandModifyClass,
+                                Data = Encoding.UTF8.GetBytes(modPayload)
+                            };
+                            break;
+
+                        case "delete":
+                            Console.Write("Ingresa el ID de la clase a eliminar: ");
+                            string deleteId = Console.ReadLine();
+    
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandDeleteClass,
+                                Data = Encoding.UTF8.GetBytes(deleteId)
+                            };
+                            break;
+ 
                         default:
                             Console.WriteLine("Command not recognized.");
                             break;

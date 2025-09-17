@@ -15,8 +15,13 @@ namespace Server
         static readonly OnlineClassRepository classRepo = new OnlineClassRepository();
         static readonly InscriptionRepository inscriptionRepo = new InscriptionRepository();
         
+        static Program()
+        {
+            SeedData();
+        }
         static void Main(string[] args)
         {
+            Console.WriteLine("Server starting with preloaded data...");
             Console.WriteLine("Starting Server Application..");
 
             Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -271,6 +276,7 @@ namespace Server
                         responseMessage = stringBuilder.ToString().TrimEnd('\n');
                     }
                     break;
+                
                 case ProtocolConstants.SearchAvailableClasses:
                 {
                     if (loggedInUser == null)
@@ -406,6 +412,79 @@ namespace Server
                 }
 
 
+
+                case ProtocolConstants.CommandModifyClass:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para modificar una clase.";
+                        break;
+                    }
+                    try
+                    {
+                        // Formato esperado: IDClase|NuevoNombre|NuevaDesc|NuevoCupo|NuevaDuracion|NuevaFecha
+                        string payload = Encoding.UTF8.GetString(frame.Data);
+                        var parts = payload.Split('|');
+                        if (parts.Length < 6) throw new Exception("Datos incompletos para modificar la clase.");
+
+                        int classId = int.Parse(parts[0]);
+                        var classToModify = classRepo.GetById(classId);
+                        if (classToModify == null) throw new Exception("La clase no existe.");
+                        
+                        // ¡AUTORIZACIÓN! Verificamos que el usuario logueado sea el creador.
+                        if (classToModify.Creator.Id != loggedInUser.Id)
+                            throw new Exception("No tienes permiso para modificar esta clase.");
+
+                        // Parseamos los nuevos datos
+                        string newName = parts[1];
+                        string newDesc = parts[2];
+                        int newCapacity = int.Parse(parts[3]);
+                        int newDuration = int.Parse(parts[4]);
+                        DateTimeOffset newDate = DateTimeOffset.Parse(parts[5]);
+                        
+                        // Usamos el método del dominio para modificar la clase
+                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, null); // Pasamos null para la imagen por ahora
+                        
+                        responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+                    break;
+
+                case ProtocolConstants.CommandDeleteClass:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para eliminar una clase.";
+                        break;
+                    }
+                    try
+                    {
+                        int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                        var classToDelete = classRepo.GetById(classId);
+                        if (classToDelete == null) throw new Exception("La clase no existe.");
+
+                        // ¡AUTORIZACIÓN!
+                        if (classToDelete.Creator.Id != loggedInUser.Id)
+                            throw new Exception("No tienes permiso para eliminar esta clase.");
+                        
+                        // Verificamos si hay inscriptos 
+                        if (inscriptionRepo.GetActiveClassByClassId(classId).Any())
+                            throw new Exception("No se puede eliminar una clase con usuarios inscriptos.");
+
+                        // La clase de dominio ya verifica si ha comenzado o no
+                        classToDelete.Eliminar(); 
+                        
+                        // Si todas las validaciones pasan, la eliminamos del repositorio
+                        classRepo.Delete(classId);
+
+                        responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
+                    break;
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
                     break;
@@ -418,6 +497,41 @@ namespace Server
                 Command = frame.Command,
                 Data = responseData
             };
+        }
+        private static void SeedData()
+        {
+            try
+            {
+                Console.WriteLine("Seeding initial data...");
+
+                // Creación de Usuarios
+                var pau = new User("pau", "pau");
+                var teo = new User("teo", "teo");
+                var romi = new User("romi", "romi");
+                userRepo.Add(pau);
+                userRepo.Add(teo);
+                userRepo.Add(romi);
+                Console.WriteLine("Users created: pau, teo, romi");
+
+                // Creación de Clases
+                // Creador para todas las clases será "pau"
+                var classPast = new OnlineClass("Clase 1", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
+                var classSoon = new OnlineClass("Clase 2", "Charla sobre IA", 5, DateTimeOffset.Now.AddDays(2), 120, pau);
+                var classFuture = new OnlineClass("Clase 3", "Fundamentos de computacion", 20, DateTimeOffset.Now.AddYears(1), 180, pau);
+                classRepo.Add(classPast);
+                classRepo.Add(classSoon);
+                classRepo.Add(classFuture);
+                Console.WriteLine("Classes created.");
+                
+                Console.WriteLine("No inscriptions where created");
+
+                Console.WriteLine("Data seeding finished successfully.");
+            }
+            catch (Exception e)
+            {
+                // Este catch es por si intentas agregar un usuario que ya existe, para que el servidor no se caiga.
+                Console.WriteLine($"Error during data seeding: {e.Message}");
+            }
         }
     }
 }
