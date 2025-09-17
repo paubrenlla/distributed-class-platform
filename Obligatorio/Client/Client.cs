@@ -13,77 +13,114 @@ namespace Client
             Console.WriteLine("Starting Client Application..");
 
             Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            IPEndPoint localEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 0);
-            clientSocket.Bind(localEndpoint);
-
+            
+            // TODO: Leer IP y Puerto desde un archivo de configuración
             IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000);
-            clientSocket.Connect(serverEndpoint);
+            
+            try
+            {
+                clientSocket.Connect(serverEndpoint);
+                Console.WriteLine("Connected to server!!");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Failed to connect to server: " + e.Message);
+                return;
+            }
 
-            Console.WriteLine("Connected to server!!");
             NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
-
             bool clientRunning = true;
+
             while (clientRunning)
             {
-                Console.WriteLine("Type command (create/list/exit):");
-                var cmd = Console.ReadLine()?.Trim().ToLower();
-                if (cmd == "exit")
+                Console.WriteLine("\nType a command (create/login/list/exit):");
+                var input = Console.ReadLine()?.Trim().ToLower();
+
+                if (input == "exit")
                 {
                     clientRunning = false;
-                    break;
+                    continue; // Salta al final del bucle para cerrar la conexión
                 }
 
-                if (cmd == "create")
-                {
-                    Console.Write("Username: ");
-                    string username = Console.ReadLine();
-                    Console.Write("Password: ");
-                    string password = Console.ReadLine();
-                    Console.Write("Display name (optional): ");
-                    string displayName = Console.ReadLine();
+                Frame requestFrame = null;
 
-                    string message = $"CREATE_USER|{username}|{password}|{displayName}";
-                    SendMessage(networkDataHelper, message);
+                try
+                {
+                    switch (input)
+                    {
+                        case "create":
+                            Console.Write("Enter new username: ");
+                            string newUsername = Console.ReadLine();
+                            Console.Write("Enter new password: ");
+                            string newPassword = Console.ReadLine();
+                
+                            string createPayload = $"{newUsername}|{newPassword}";
+                
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandCreateUser,
+                                Data = Encoding.UTF8.GetBytes(createPayload)
+                            };
+                            break;
 
-                    string serverResponse = ReceiveResponse(networkDataHelper);
-                    Console.WriteLine("Server: " + serverResponse);
+                        case "login":
+                            Console.Write("Username: ");
+                            string username = Console.ReadLine();
+                            Console.Write("Password: ");
+                            string password = Console.ReadLine();
+                
+                            string loginPayload = $"{username}|{password}";
+                
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandLogin,
+                                Data = Encoding.UTF8.GetBytes(loginPayload)
+                            };
+                            break;
+
+                        case "list":
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandListClasses,
+                                Data = null // No se necesitan datos para listar clases
+                            };
+                            break;
+                            
+                        default:
+                            Console.WriteLine("Command not recognized.");
+                            break;
+                    }
+                    
+                    if (requestFrame != null)
+                    {
+                        // Enviar la trama de solicitud al servidor
+                        networkDataHelper.Send(requestFrame);
+                        Console.WriteLine("Request sent to server...");
+
+                        // Esperar y recibir la trama de respuesta
+                        Frame serverResponse = networkDataHelper.Receive();
+                        string responseData = "No data received.";
+                        if (serverResponse.Data != null)
+                        {
+                           responseData = Encoding.UTF8.GetString(serverResponse.Data);
+                        }
+                        
+                        Console.WriteLine($"-> Server Response (CMD {serverResponse.Command}): {responseData}");
+                    }
                 }
-                else if (cmd == "list")
+                catch (Exception e)
                 {
-                    string message = "LIST_USERS";
-                    SendMessage(networkDataHelper, message);
-                    string serverResponse = ReceiveResponse(networkDataHelper);
-                    Console.WriteLine("Server: " + serverResponse);
-                }
-                else
-                {
-                    Console.WriteLine("Comando no reconocido. Usa create, list o exit.");
+                    Console.WriteLine("An error occurred: " + e.Message);
+                    clientRunning = false; // Termina el cliente si hay un error de red
                 }
             }
 
             Console.WriteLine("Closing connection...");
             clientSocket.Shutdown(SocketShutdown.Both);
             clientSocket.Close();
-        }
-
-        static void SendMessage(NetworkDataHelper helper, string message)
-        {
-            byte[] messageBytes = Encoding.UTF8.GetBytes(message);
-            ushort messageLength = (ushort)messageBytes.Length;
-            byte[] messageLengthBytes = BitConverter.GetBytes(messageLength);
-
-            helper.Send(messageLengthBytes);
-            helper.Send(messageBytes);
-            Console.WriteLine("Sent message...");
-        }
-
-        static string ReceiveResponse(NetworkDataHelper helper)
-        {
-            byte[] responseLenBuffer = helper.Receive(2);
-            ushort responseLen = BitConverter.ToUInt16(responseLenBuffer);
-            byte[] responseBuffer = helper.Receive(responseLen);
-            string response = Encoding.UTF8.GetString(responseBuffer);
-            return response;
         }
     }
 }
