@@ -33,7 +33,7 @@ namespace Client
 
             while (clientRunning)
             {
-                Console.WriteLine("\nType a command (create/login/list/exit):");
+                Console.WriteLine("\nType a command (create/login/listclasses/createclass/exit):");
                 var input = Console.ReadLine()?.Trim().ToLower();
 
                 if (input == "exit")
@@ -80,15 +80,34 @@ namespace Client
                             };
                             break;
 
-                        case "list":
+                        case "listclasses":
                             requestFrame = new Frame
                             {
                                 Header = ProtocolConstants.Request,
                                 Command = ProtocolConstants.CommandListClasses,
-                                Data = null // No se necesitan datos para listar clases
+                                Data = null
                             };
                             break;
-                            
+
+                        case "createclass":
+                            Console.Write("Nombre de la clase: ");
+                            string name = Console.ReadLine();
+                            Console.Write("Descripción: ");
+                            string desc = Console.ReadLine();
+                            Console.Write("Cupo máximo: ");
+                            string capacity = Console.ReadLine();
+                            Console.Write("Duración (minutos): ");
+                            string duration = Console.ReadLine();
+
+                            string payload = $"{name}|{desc}|{capacity}|{duration}";
+                
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandCreateClass,
+                                Data = Encoding.UTF8.GetBytes(payload)
+                            };
+                            break;
                         default:
                             Console.WriteLine("Command not recognized.");
                             break;
@@ -121,6 +140,35 @@ namespace Client
             Console.WriteLine("Closing connection...");
             clientSocket.Shutdown(SocketShutdown.Both);
             clientSocket.Close();
+        }
+        
+        static void ProcessServerResponse(string response)
+        {
+            var parts = response.Split(new[] { '|' }, 2);
+            var status = parts[0];
+            var data = parts.Length > 1 ? parts[1] : string.Empty;
+
+            Console.WriteLine($"-> Status: {status}");
+            if (!string.IsNullOrEmpty(data))
+            {
+                // Si la respuesta es una lista de clases, la formateamos
+                if (response.Contains("\n")) 
+                {
+                    var classLines = data.Split('\n');
+                    Console.WriteLine("  ID | Nombre de la Clase | Cupos | ¿Tiene Portada?");
+                    Console.WriteLine("  ---|--------------------|-------|----------------");
+                    foreach (var line in classLines)
+                    {
+                        var classData = line.Split('|');
+                        // Formato: Id|Nombre|CuposOcupados|CupoMaximo|TieneImagen
+                        Console.WriteLine($"  {classData[0],-2} | {classData[1],-18} | {classData[2]}/{classData[3],-4} | {classData[4]}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"   Message: {data}");
+                }
+            }
         }
     }
 }
