@@ -33,7 +33,7 @@ namespace Client
 
             while (clientRunning)
             {
-                Console.WriteLine("\nType a command (create/login/list/exit):");
+                Console.WriteLine("\nType a command (create/login/listclasses/createclass/exit):");
                 var input = Console.ReadLine()?.Trim().ToLower();
 
                 if (input == "exit")
@@ -80,15 +80,34 @@ namespace Client
                             };
                             break;
 
-                        case "list":
+                        case "listclasses":
                             requestFrame = new Frame
                             {
                                 Header = ProtocolConstants.Request,
                                 Command = ProtocolConstants.CommandListClasses,
-                                Data = null // No se necesitan datos para listar clases
+                                Data = null
                             };
                             break;
-                            
+
+                        case "createclass":
+                            Console.Write("Nombre de la clase: ");
+                            string name = Console.ReadLine();
+                            Console.Write("Descripción: ");
+                            string desc = Console.ReadLine();
+                            Console.Write("Cupo máximo: ");
+                            string capacity = Console.ReadLine();
+                            Console.Write("Duración (minutos): ");
+                            string duration = Console.ReadLine();
+
+                            string payload = $"{name}|{desc}|{capacity}|{duration}";
+                
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandCreateClass,
+                                Data = Encoding.UTF8.GetBytes(payload)
+                            };
+                            break;
                         default:
                             Console.WriteLine("Command not recognized.");
                             break;
@@ -107,8 +126,8 @@ namespace Client
                         {
                            responseData = Encoding.UTF8.GetString(serverResponse.Data);
                         }
-                        
-                        Console.WriteLine($"-> Server Response (CMD {serverResponse.Command}): {responseData}");
+
+                        ProcessServerResponse(responseData, serverResponse.Command);
                     }
                 }
                 catch (Exception e)
@@ -121,6 +140,45 @@ namespace Client
             Console.WriteLine("Closing connection...");
             clientSocket.Shutdown(SocketShutdown.Both);
             clientSocket.Close();
+        }
+        
+        static void ProcessServerResponse(string response, short command)
+        {
+            var parts = response.Split(new[] { '|' }, 2);
+            var status = parts[0];
+            var data = parts.Length > 1 ? parts[1] : string.Empty;
+
+            Console.WriteLine($"-> Status: {status}");
+
+            if (command == ProtocolConstants.CommandListClasses && status == "OK")
+            {
+                if (string.IsNullOrEmpty(data) || !data.Contains("|"))
+                {
+                    // Si no hay datos de clases, lo tratamos como un mensaje simple.
+                    Console.WriteLine($"   Message: {data}");
+                }
+                else
+                {
+                    // Si hay datos, imprimimos la tabla completa.
+                    var classLines = data.Split('\n');
+                    Console.WriteLine("  ID | Nombre            | Cupos   | Portada");
+                    Console.WriteLine("  ---|-------------------|---------|---------");
+                    foreach (var line in classLines)
+                    {
+                        if (string.IsNullOrEmpty(line)) continue;
+                        var classData = line.Split('|');
+                        if (classData.Length >= 5)
+                        {
+                            string cupos = $"{classData[2]}/{classData[3]}";
+                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {cupos,-7} | {classData[4]}");
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"   Message: {data}");
+            }
         }
     }
 }

@@ -12,7 +12,8 @@ namespace Server
     internal class Program
     {
         static UserRepository userRepo = new UserRepository();
-
+        static readonly OnlineClassRepository classRepo = new OnlineClassRepository();
+        
         static void Main(string[] args)
         {
             Console.WriteLine("Starting Server Application..");
@@ -132,14 +133,58 @@ namespace Server
                     break;
                     
                 case ProtocolConstants.CommandListClasses:
-                    if (loggedInUser == null)
-                    {
-                        responseMessage = "ERR|Debes iniciar sesión para ver las clases.";
-                        break;
-                    }
-                    // Lógica para listar clases... por ahora un placeholder.
-                    responseMessage = $"OK|Hola {loggedInUser.Username}, aquí está la lista de clases: [...]";
-                    break;
+            if (loggedInUser == null)
+            {
+                responseMessage = "ERR|Debes iniciar sesión para ver las clases.";
+                break;
+            }
+
+            var allClasses = classRepo.GetAll();
+            if (allClasses.Count == 0)
+            {
+                responseMessage = "OK|No hay clases disponibles por el momento.";
+            }
+            else
+            {
+                // Serializamos la lista de clases a nuestro formato
+                var stringBuilder = new System.Text.StringBuilder();
+                stringBuilder.Append("OK|");
+                foreach (var onlineClass in allClasses)
+                {
+                    stringBuilder.Append($"{onlineClass.Id}|{onlineClass.Name}|{onlineClass.Registered.Count}|{onlineClass.MaxCapacity}|{onlineClass.Image != null}\n");
+                }
+                responseMessage = stringBuilder.ToString().TrimEnd('\n');
+            }
+            break;
+
+        case ProtocolConstants.CommandCreateClass:
+            if (loggedInUser == null)
+            {
+                responseMessage = "ERR|Debes iniciar sesión para crear una clase.";
+                break;
+            }
+            try
+            {
+                // Deserializamos los datos enviados por el cliente
+                string payload = Encoding.UTF8.GetString(frame.Data);
+                var parts = payload.Split('|');
+                if (parts.Length < 4) throw new Exception("Datos incompletos para crear la clase.");
+
+                string name = parts[0];
+                string description = parts[1];
+                int maxCapacity = int.Parse(parts[2]);
+                int duration = int.Parse(parts[3]);
+                
+                var newClass = new OnlineClass(name, description, maxCapacity, DateTime.Now, duration, loggedInUser);
+                classRepo.Add(newClass);
+
+                responseMessage = $"OK|Clase '{name}' creada con éxito con el ID: {newClass.Id}";
+            }
+            catch (Exception ex)
+            {
+                responseMessage = $"ERR|{ex.Message}";
+            }
+            break;
                     
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
