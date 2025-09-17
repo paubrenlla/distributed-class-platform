@@ -19,10 +19,7 @@ namespace Domain
         public string Link { get; private set; }
         public string Image { get; private set; } // ruta o nombre de archivo
         public User Creator { get; private set; }
-
-        private readonly List<User> _registered;
-        public IReadOnlyCollection<User> Registered => _registered.AsReadOnly();
-
+        
         public OnlineClass(
             string nombre,
             string descripcion,
@@ -49,8 +46,6 @@ namespace Domain
             Creator = creador;
 
             Link = $"clase-{Id}-{Guid.NewGuid().ToString().Substring(0, 6)}";
-
-            _registered = new List<User>();
         }
 
         public void Modificar(string nuevoNombre, string nuevaDescripcion, int nuevoCupoMaximo, DateTimeOffset nuevaFechaHora, int nuevaDuracion, string nuevaImagen = null)
@@ -67,38 +62,12 @@ namespace Domain
 
         public void Eliminar()
         {
-            if (_registered.Any()) throw new InvalidOperationException("No se puede eliminar una clase con inscriptos");
             if (DateTimeOffset.UtcNow >= StartDate) throw new InvalidOperationException("No se puede eliminar una clase que ya comenzó");
-        }
-
-        public void Inscribir(User usuario)
-        {
-            if (usuario == null) throw new ArgumentNullException(nameof(usuario));
-            if (_registered.Contains(usuario)) throw new InvalidOperationException("Usuario ya inscripto");
-            if (_registered.Count >= MaxCapacity) throw new InvalidOperationException("Cupo máximo alcanzado");
-
-            _registered.Add(usuario);
-        }
-
-        public void CancelarInscripcion(User usuario)
-        {
-            if (usuario == null) throw new ArgumentNullException(nameof(usuario));
-            if (!_registered.Contains(usuario)) throw new InvalidOperationException("El usuario no está inscripto en la clase");
-
-            var tiempoRestante = StartDate - DateTimeOffset.UtcNow;
-            if (tiempoRestante.TotalMinutes < 2) throw new InvalidOperationException("No se puede cancelar la inscripción con menos de 2 minutos de antelación");
-
-            _registered.Remove(usuario);
-        }
-
-        public int CuposDisponibles()
-        {
-            return MaxCapacity - _registered.Count;
         }
 
         public override string ToString()
         {
-            return $"ClaseOnline{{Id={Id}, Nombre={Name}, Inicio={StartDate}, Duracion={Duration}m, Cupos={_registered.Count}/{MaxCapacity}}}";
+            return $"ClaseOnline{{Id={Id}, Nombre={Name}, Inicio={StartDate}, Duracion={Duration}}}";
         }
     }
 }
