@@ -33,7 +33,7 @@ namespace Client
 
             while (clientRunning)
             {
-                Console.WriteLine("\nType a command (create/login/listclasses/createclass/subscribe/exit):");
+                Console.WriteLine("\nType a command (create/login/listclasses/createclass/subscribe/cancel/history/exit):");
                 var input = Console.ReadLine()?.Trim().ToLower();
 
                 if (input == "exit")
@@ -98,8 +98,10 @@ namespace Client
                             string capacity = Console.ReadLine();
                             Console.Write("Duración (minutos): ");
                             string duration = Console.ReadLine();
+                            Console.Write("Fecha y hora de inicio (formato AAAA-MM-DD HH:MM): ");
+                            string startDateStr = Console.ReadLine();
 
-                            string payload = $"{name}|{desc}|{capacity}|{duration}";
+                            string payload = $"{name}|{desc}|{capacity}|{duration}|{startDateStr}";
                 
                             requestFrame = new Frame
                             {
@@ -117,6 +119,26 @@ namespace Client
                                 Header = ProtocolConstants.Request,
                                 Command = ProtocolConstants.CommandSubscribeToClass,
                                 Data = Encoding.UTF8.GetBytes(classId)
+                            };
+                            break;
+                        case "cancel":
+                            Console.Write("Ingresa el ID de la clase para cancelar tu inscripción: ");
+                            string classIdToCancel = Console.ReadLine();
+    
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandCancelSubscription,
+                                Data = Encoding.UTF8.GetBytes(classIdToCancel)
+                            };
+                            break;
+
+                        case "history":
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandShowHistory,
+                                Data = null 
                             };
                             break;
                         default:
@@ -172,16 +194,39 @@ namespace Client
                 {
                     // Si hay datos, imprimimos la tabla completa.
                     var classLines = data.Split('\n');
-                    Console.WriteLine("  ID | Nombre            | Cupos   | Portada");
-                    Console.WriteLine("  ---|-------------------|---------|---------");
+                    Console.WriteLine("  ID | Nombre            | Fecha de Inicio     | Cupos   | Portada");
+                    Console.WriteLine("  ---|-------------------|---------------------|---------|---------");
                     foreach (var line in classLines)
                     {
                         if (string.IsNullOrEmpty(line)) continue;
                         var classData = line.Split('|');
-                        if (classData.Length >= 5)
+                        if (classData.Length >= 6)
                         {
-                            string cupos = $"{classData[2]}/{classData[3]}";
-                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {cupos,-7} | {classData[4]}");
+                            string cupos = $"{classData[3]}/{classData[4]}";
+                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {classData[2],-19} | {cupos,-7} | {classData[5]}");
+                        }
+
+                    }
+                }
+            }
+            else if (command == ProtocolConstants.CommandShowHistory && status == "OK")
+            {
+                if (string.IsNullOrEmpty(data) || !data.Contains("|"))
+                {
+                    Console.WriteLine($"   Message: {data}");
+                }
+                else
+                {
+                    var historyLines = data.Split('\n');
+                    Console.WriteLine("  Nombre de la Clase    | Fecha de Inicio     | Estado");
+                    Console.WriteLine("  ----------------------|---------------------|-----------");
+                    foreach (var line in historyLines)
+                    {
+                        if (string.IsNullOrEmpty(line)) continue;
+                        var historyData = line.Split('|');
+                        if (historyData.Length >= 3)
+                        {
+                            Console.WriteLine($"  {historyData[0],-21} | {historyData[1],-19} | {historyData[2]}");
                         }
                     }
                 }
