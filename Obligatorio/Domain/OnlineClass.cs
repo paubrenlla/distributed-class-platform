@@ -14,6 +14,8 @@ namespace Domain
         public string Name { get; private set; }
         public string Description { get; private set; }
         public int MaxCapacity { get; private set; }
+
+        public int Inscribers { get; private set; }
         public DateTimeOffset StartDate { get; private set; }
         public int Duration { get; private set; }
         public string Link { get; private set; }
@@ -44,6 +46,7 @@ namespace Domain
             Duration = duracionMinutos;
             Image = imagenPortada;
             Creator = creador;
+            Inscribers = 0;
 
             Link = $"clase-{Id}-{Guid.NewGuid().ToString().Substring(0, 6)}";
         }
