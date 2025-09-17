@@ -33,7 +33,7 @@ namespace Client
 
             while (clientRunning)
             {
-                Console.WriteLine("\nType a command (create/login/listclasses/createclass/subscribe/cancel/history/exit):");
+                Console.WriteLine("\nType a command (create/login/listclasses/createclass/subscribe/cancel/history/availableclasses/searchclasses/exit):");
                 var input = Console.ReadLine()?.Trim().ToLower();
 
                 if (input == "exit")
@@ -141,6 +141,62 @@ namespace Client
                                 Data = null 
                             };
                             break;
+                        case "availableclasses":
+                            requestFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.SearchAvailableClasses,
+                                Data = null
+                            };
+                            break;
+
+                        case "searchclasses":
+                            Console.WriteLine("Selecciona el tipo de filtro: 1=Nombre, 2=Descripción, 3=Disponibilidad mínima de cupos");
+                            string filtroTipo = Console.ReadLine()?.Trim();
+
+                            Frame searchFrame = null;
+
+                            switch (filtroTipo)
+                            {
+                                case "1": 
+                                    Console.Write("Ingresa el nombre a buscar: ");
+                                    string filtroNombre = Console.ReadLine();
+                                    searchFrame = new Frame
+                                    {
+                                        Header = ProtocolConstants.Request,
+                                        Command = ProtocolConstants.SearchClassesByNamwe,
+                                        Data = Encoding.UTF8.GetBytes(filtroNombre)
+                                    };
+                                    break;
+                                case "2": 
+                                    Console.Write("Ingresa la descripción a buscar: ");
+                                    string filtroDesc = Console.ReadLine();
+                                    searchFrame = new Frame
+                                    {
+                                        Header = ProtocolConstants.Request,
+                                        Command = ProtocolConstants.SearchClassesByDescription,
+                                        Data = Encoding.UTF8.GetBytes(filtroDesc)
+                                    };
+                                    break;
+                                case "3": 
+                                    Console.Write("Ingresa la cantidad mínima de cupos disponibles: ");
+                                    string minCuposStr = Console.ReadLine();
+                                    searchFrame = new Frame
+                                    {
+                                        Header = ProtocolConstants.Request,
+                                        Command = ProtocolConstants.SearchClassesByAvailabilty,
+                                        Data = Encoding.UTF8.GetBytes(minCuposStr)
+                                    };
+                                    break;
+                                default:
+                                    Console.WriteLine("Opción inválida.");
+                                    break;
+                            }
+
+                            if (searchFrame != null)
+                                requestFrame = searchFrame;
+                            break;
+
                         default:
                             Console.WriteLine("Command not recognized.");
                             break;
@@ -148,11 +204,9 @@ namespace Client
                     
                     if (requestFrame != null)
                     {
-                        // Enviar la trama de solicitud al servidor
                         networkDataHelper.Send(requestFrame);
                         Console.WriteLine("Request sent to server...");
 
-                        // Esperar y recibir la trama de respuesta
                         Frame serverResponse = networkDataHelper.Receive();
                         string responseData = "No data received.";
                         if (serverResponse.Data != null)
@@ -166,7 +220,7 @@ namespace Client
                 catch (Exception e)
                 {
                     Console.WriteLine("An error occurred: " + e.Message);
-                    clientRunning = false; // Termina el cliente si hay un error de red
+                    clientRunning = false;
                 }
             }
 
@@ -187,12 +241,10 @@ namespace Client
             {
                 if (string.IsNullOrEmpty(data) || !data.Contains("|"))
                 {
-                    // Si no hay datos de clases, lo tratamos como un mensaje simple.
                     Console.WriteLine($"   Message: {data}");
                 }
                 else
                 {
-                    // Si hay datos, imprimimos la tabla completa.
                     var classLines = data.Split('\n');
                     Console.WriteLine("  ID | Nombre            | Fecha de Inicio     | Cupos   | Portada");
                     Console.WriteLine("  ---|-------------------|---------------------|---------|---------");
@@ -231,6 +283,35 @@ namespace Client
                     }
                 }
             }
+            else if ((command == ProtocolConstants.CommandListClasses ||
+                      command == ProtocolConstants.SearchAvailableClasses ||
+                      command == ProtocolConstants.SearchClassesByNamwe ||
+                      command == ProtocolConstants.SearchClassesByDescription ||
+                      command == ProtocolConstants.SearchClassesByAvailabilty)
+                     && status == "OK")
+            {
+                if (string.IsNullOrEmpty(data) || !data.Contains("|"))
+                {
+                    Console.WriteLine($"   Message: {data}");
+                }
+                else
+                {
+                    var classLines = data.Split('\n');
+                    Console.WriteLine("  ID | Nombre            | Fecha de Inicio     | Cupos   | Portada");
+                    Console.WriteLine("  ---|-------------------|---------------------|---------|---------");
+                    foreach (var line in classLines)
+                    {
+                        if (string.IsNullOrEmpty(line)) continue;
+                        var classData = line.Split('|');
+                        if (classData.Length >= 6)
+                        {
+                            string cupos = $"{classData[3]}/{classData[4]}";
+                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {classData[2],-19} | {cupos,-7} | {classData[5]}");
+                        }
+                    }
+                }
+            }
+
             else
             {
                 Console.WriteLine($"   Message: {data}");

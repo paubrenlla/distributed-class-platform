@@ -6,7 +6,7 @@ using System.Text;
 
 public class Frame
 {
-    public string Header { get; set; } // REQ o RES
+    public string Header { get; set; } 
     public short Command { get; set; }
     public byte[] Data { get; set; }
 }
@@ -22,13 +22,10 @@ public class NetworkDataHelper
     
     public void Send(Frame frame)
     {
-        // Convertir Header a bytes (ASCII)
         byte[] headerBytes = Encoding.ASCII.GetBytes(frame.Header);
         
-        // Convertir Command a bytes (short -> 2 bytes)
         byte[] commandBytes = BitConverter.GetBytes(frame.Command);
 
-        // Obtener el largo de los datos y convertirlo a bytes (int -> 4 bytes)
         int dataLength = frame.Data?.Length ?? 0;
         byte[] dataLengthBytes = BitConverter.GetBytes(dataLength);
 
@@ -52,15 +49,12 @@ public class NetworkDataHelper
     
     public Frame Receive()
     {
-        // Recibir la parte fija del encabezado (9 bytes)
         byte[] fixedHeader = Receive(ProtocolConstants.FixedHeaderSize);
 
-        // Deserializar los campos fijos
         string header = Encoding.ASCII.GetString(fixedHeader, 0, ProtocolConstants.HeaderLength);
         short command = BitConverter.ToInt16(fixedHeader, ProtocolConstants.HeaderLength);
         int dataLength = BitConverter.ToInt32(fixedHeader, ProtocolConstants.HeaderLength + ProtocolConstants.CommandLength);
         
-        // Recibir los datos (si hay)
         byte[] data = null;
         if (dataLength > 0)
         {

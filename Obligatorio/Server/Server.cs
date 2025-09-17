@@ -24,7 +24,7 @@ namespace Server
             IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000); 
 
             serverSocket.Bind(serverEndpoint);
-            serverSocket.Listen(10); // Escucha hasta 10 clientes en cola
+            serverSocket.Listen(10);
 
             Console.WriteLine("Waiting for clients to connect...");
 
@@ -88,7 +88,7 @@ namespace Server
                 case ProtocolConstants.CommandCreateUser:
                     try
                     {
-                        string payload = Encoding.UTF8.GetString(frame.Data); // "usuario|clave"
+                        string payload = Encoding.UTF8.GetString(frame.Data);
                         var parts = payload.Split('|');
                         if (parts.Length < 2) throw new Exception("Formato incorrecto. Se esperaba 'usuario|clave'.");
 
@@ -111,7 +111,7 @@ namespace Server
                     }
                     try
                     {
-                        string credentials = Encoding.UTF8.GetString(frame.Data); // "usuario|clave"
+                        string credentials = Encoding.UTF8.GetString(frame.Data);
                         var parts = credentials.Split('|');
                         if (parts.Length < 2) throw new Exception("Formato incorrecto. Se esperaba 'usuario|clave'.");
 
@@ -202,7 +202,6 @@ namespace Server
                         var classToJoin = classRepo.GetById(classId);
                         if (classToJoin == null) throw new Exception("La clase no existe.");
 
-                        // Verificamos si ya está inscrito
                         if(inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId) != null)
                             throw new Exception("Ya estás inscrito en esta clase.");
 
@@ -231,12 +230,10 @@ namespace Server
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
                         
-                        // Buscamos la inscripción activa del usuario en esa clase
                         var inscription = inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId);
                         if (inscription == null) 
                             throw new Exception("No estás inscrito en esta clase.");
 
-                        // Verificamos la regla de los 2 minutos de antelación [cite: 69]
                         var remainingTime = inscription.Class.StartDate - DateTimeOffset.UtcNow;
                         if (remainingTime.TotalMinutes < 2)
                             throw new InvalidOperationException("No se puede cancelar la inscripción con menos de 2 minutos de antelación.");
@@ -265,8 +262,6 @@ namespace Server
                     }
                     else
                     {
-                        // Serializamos el historial para enviarlo al cliente
-                        // Formato: NombreClase|FechaClase|EstadoInscripcion
                         var stringBuilder = new System.Text.StringBuilder();
                         stringBuilder.Append("OK|");
                         foreach (var insp in userInscriptions)
@@ -276,6 +271,141 @@ namespace Server
                         responseMessage = stringBuilder.ToString().TrimEnd('\n');
                     }
                     break;
+                case ProtocolConstants.SearchAvailableClasses:
+                {
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para buscar clases.";
+                        break;
+                    }
+
+                    var disponibles = classRepo
+                        .GetAll()
+                        .Where(c => DateTimeOffset.UtcNow < c.StartDate && (c.MaxCapacity - c.Inscribers) > 0)
+                        .OrderByDescending(c => c.MaxCapacity - c.Inscribers)
+                        .ToList();
+
+                    if (disponibles.Count == 0)
+                    {
+                        responseMessage = "OK|No hay clases disponibles por el momento.";
+                    }
+                    else
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        sb.Append("OK|");
+                        foreach (var c in disponibles)
+                        {
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{c.Inscribers}|{c.MaxCapacity}|{c.Image != null}\n");
+                        }
+                        responseMessage = sb.ToString().TrimEnd('\n');
+                    }
+                    break;
+                }
+
+
+                case ProtocolConstants.SearchClassesByNamwe:
+                {
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para buscar clases.";
+                        break;
+                    }
+
+                    string filtroNombre = Encoding.UTF8.GetString(frame.Data);
+                    var clases = classRepo
+                        .GetAll()
+                        .Where(c => c.Name.Contains(filtroNombre, StringComparison.OrdinalIgnoreCase))
+                        .OrderByDescending(c => c.MaxCapacity - c.Inscribers)
+                        .ToList();
+
+                    if (clases.Count == 0)
+                    {
+                        responseMessage = $"OK|No hay clases con nombre que contenga '{filtroNombre}'.";
+                    }
+                    else
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        sb.Append("OK|");
+                        foreach (var c in clases)
+                        {
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{c.Inscribers}|{c.MaxCapacity}|{c.Image != null}\n");
+                        }
+                        responseMessage = sb.ToString().TrimEnd('\n');
+                    }
+                    break;
+                }
+
+                case ProtocolConstants.SearchClassesByDescription:
+                {
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para buscar clases.";
+                        break;
+                    }
+
+                    string filtroDesc = Encoding.UTF8.GetString(frame.Data);
+                    var clases = classRepo
+                        .GetAll()
+                        .Where(c => c.Description.Contains(filtroDesc, StringComparison.OrdinalIgnoreCase))
+                        .OrderByDescending(c => c.MaxCapacity - c.Inscribers)
+                        .ToList();
+
+                    if (clases.Count == 0)
+                    {
+                        responseMessage = $"OK|No hay clases con descripción que contenga '{filtroDesc}'.";
+                    }
+                    else
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        sb.Append("OK|");
+                        foreach (var c in clases)
+                        {
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{c.Inscribers}|{c.MaxCapacity}|{c.Image != null}\n");
+                        }
+                        responseMessage = sb.ToString().TrimEnd('\n');
+                    }
+                    break;
+                }
+
+                case ProtocolConstants.SearchClassesByAvailabilty:
+                {
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para buscar clases.";
+                        break;
+                    }
+
+                    if (int.TryParse(Encoding.UTF8.GetString(frame.Data), out int minCupos))
+                    {
+                        var clases = classRepo
+                            .GetAll()
+                            .Where(c => DateTimeOffset.UtcNow < c.StartDate && (c.MaxCapacity - c.Inscribers) > minCupos)
+                            .OrderByDescending(c => c.MaxCapacity - c.Inscribers)
+                            .ToList();
+
+                        if (clases.Count == 0)
+                        {
+                            responseMessage = "OK|No hay clases con cupos disponibles.";
+                        }
+                        else
+                        {
+                            var sb = new System.Text.StringBuilder();
+                            sb.Append("OK|");
+                            foreach (var c in clases)
+                            {
+                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{c.Inscribers}|{c.MaxCapacity}|{c.Image != null}\n");
+                            }
+                            responseMessage = sb.ToString().TrimEnd('\n');
+                        }
+                    }
+                    else
+                    {
+                        responseMessage = "ERR|Parámetro inválido (se esperaba un número).";
+                    }
+                    break;
+                }
+
+
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
                     break;
