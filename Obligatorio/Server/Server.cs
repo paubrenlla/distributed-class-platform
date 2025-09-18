@@ -301,8 +301,8 @@ namespace Server
                         sb.Append("OK|");
                         foreach (var c in disponibles)
                         {
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{c.Inscribers}|{c.MaxCapacity}|{c.Image != null}\n");
-                        }
+                            var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");                        }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
                     break;
@@ -334,7 +334,8 @@ namespace Server
                         sb.Append("OK|");
                         foreach (var c in clases)
                         {
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{c.Inscribers}|{c.MaxCapacity}|{c.Image != null}\n");
+                            var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -366,7 +367,8 @@ namespace Server
                         sb.Append("OK|");
                         foreach (var c in clases)
                         {
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{c.Inscribers}|{c.MaxCapacity}|{c.Image != null}\n");
+                            var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -399,7 +401,8 @@ namespace Server
                             sb.Append("OK|");
                             foreach (var c in clases)
                             {
-                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{c.Inscribers}|{c.MaxCapacity}|{c.Image != null}\n");
+                                var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
+                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                             }
                             responseMessage = sb.ToString().TrimEnd('\n');
                         }
