@@ -9,6 +9,8 @@ namespace Client
     internal class Program
     {
         private static NetworkDataHelper _networkHelper;
+        private enum AuthResult { LoginSuccess, Exit }
+        private enum MenuStatus { Unknown, LogOut, Escape}
 
         static void Main(string[] args)
         {
@@ -30,9 +32,24 @@ namespace Client
                 return;
             }
 
-            if (RunAuthMenu())
+            bool appIsRunning = true;
+            while (appIsRunning)
             {
-                RunMainMenu();
+                AuthResult authResult = RunAuthMenu();
+
+                if (authResult == AuthResult.LoginSuccess)
+                {
+                    var menuStatus = RunMainMenu();
+
+                    if (menuStatus != MenuStatus.LogOut)
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    appIsRunning = false;
+                }
             }
 
             Console.WriteLine("Cerrando conexión...");
@@ -40,7 +57,7 @@ namespace Client
             clientSocket.Close();
         }
         
-        private static bool RunAuthMenu()
+        private static AuthResult RunAuthMenu()
         {
             while (true)
             {
@@ -80,7 +97,7 @@ namespace Client
                         };
                         break;
                     case "3": // Salir
-                        return false;
+                        return AuthResult.Exit;
                     default:
                         Console.WriteLine("Opción no válida. Intente de nuevo.");
                         continue;
@@ -95,7 +112,7 @@ namespace Client
                     if (requestFrame.Command == ProtocolConstants.CommandLogin && responseData.StartsWith("OK"))
                     {
                         ProcessSimpleResponse(responseData);
-                        return true; // Login exitoso
+                        return AuthResult.LoginSuccess; // Login exitoso
                     }
                     else
                     {
@@ -105,10 +122,11 @@ namespace Client
             }
         }
         
-        private static void RunMainMenu()
+        private static MenuStatus RunMainMenu()
         {
-            bool clientRunning = true;
-            while (clientRunning)
+            MenuStatus menuStatus = MenuStatus.Unknown;
+            bool sessionRunning = true;
+            while (sessionRunning)
             {
                 Console.WriteLine("\n--- Menú Principal ---");
                 Console.WriteLine("1. Listar todas las clases disponibles");
@@ -119,7 +137,8 @@ namespace Client
                 Console.WriteLine("6. Modificar una clase (creador)");
                 Console.WriteLine("7. Eliminar una clase (creador)");
                 Console.WriteLine("8. Buscar clases");
-                Console.WriteLine("9. Salir");
+                Console.WriteLine("9. Cerrar sesion");
+                Console.WriteLine("10. Salir de la Aplicación");
                 Console.Write("Seleccione una opción: ");
 
                 string input = Console.ReadLine();
@@ -250,8 +269,22 @@ namespace Client
                         // Asignamos el header
                         if(requestFrame != null) requestFrame.Header = ProtocolConstants.Request;
                         break;
-                    case "9":
-                        clientRunning = false;
+                    case "9": // Cerrar Sesión
+                        requestFrame = new Frame
+                        {
+                            Header = ProtocolConstants.Request,
+                            Command = ProtocolConstants.CommandLogout,
+                            Data = null
+                        };
+                        Frame response = SendAndReceiveFrame(requestFrame);
+                        ProcessSimpleResponse(Encoding.UTF8.GetString(response.Data));
+                        menuStatus = MenuStatus.LogOut;
+                        sessionRunning = false; // Termina el bucle del menú principal
+                        continue;
+                    case "10": // Salir de la Aplicación
+                        SendAndReceiveFrame(new Frame { Command = ProtocolConstants.CommandLogout, Header = ProtocolConstants.Request });
+                        menuStatus = MenuStatus.Escape;
+                        sessionRunning = false;
                         continue;
                     default:
                         Console.WriteLine("Opción no válida. Intente de nuevo.");
@@ -264,6 +297,7 @@ namespace Client
                     ProcessFullResponse(responseFrame); 
                 }
             }
+            return menuStatus;
         }
         
         private static Frame SendAndReceiveFrame(Frame frame)

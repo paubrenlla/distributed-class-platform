@@ -413,9 +413,6 @@ namespace Server
                     }
                     break;
                 }
-
-
-
                 case ProtocolConstants.CommandModifyClass:
                     if (loggedInUser == null)
                     {
@@ -488,6 +485,19 @@ namespace Server
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
+                
+                case ProtocolConstants.CommandLogout:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|No hay ninguna sesión activa para cerrar.";
+                    }
+                    else
+                    {
+                        responseMessage = $"OK|Sesión de '{loggedInUser.Username}' cerrada correctamente.";
+                        loggedInUser = null;
+                    }
+                    break;
+                
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
                     break;
