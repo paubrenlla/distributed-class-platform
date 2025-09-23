@@ -61,7 +61,8 @@ namespace Server
                     // Pasamos 'loggedInUser' por referencia para que ProcessCommand pueda modificarlo.
                     Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser, networkDataHelper); 
             
-                    networkDataHelper.Send(responseFrame);
+                    if(responseFrame !=null)
+                        networkDataHelper.Send(responseFrame);
                 }
                 catch (SocketException)
                 {
@@ -210,7 +211,6 @@ namespace Server
                         if(inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId) != null)
                             throw new Exception("Ya estás inscrito en esta clase.");
 
-                        // Verificamos cupos
                         var activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId);
                         if(activeInscriptions.Count >= classToJoin.MaxCapacity)
                             throw new Exception("La clase no tiene cupos disponibles.");
@@ -436,18 +436,15 @@ namespace Server
                         var classToModify = classRepo.GetById(classId);
                         if (classToModify == null) throw new Exception("La clase no existe.");
                         
-                        // ¡AUTORIZACIÓN! Verificamos que el usuario logueado sea el creador.
                         if (classToModify.Creator.Id != loggedInUser.Id)
                             throw new Exception("No tienes permiso para modificar esta clase.");
 
-                        // Parseamos los nuevos datos
                         string newName = parts[1];
                         string newDesc = parts[2];
                         int newCapacity = int.Parse(parts[3]);
                         int newDuration = int.Parse(parts[4]);
                         DateTimeOffset newDate = DateTimeOffset.Parse(parts[5]);
                         
-                        // Usamos el método del dominio para modificar la clase
                         classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, null); // Pasamos null para la imagen por ahora
                         
                         responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
@@ -470,18 +467,14 @@ namespace Server
                         var classToDelete = classRepo.GetById(classId);
                         if (classToDelete == null) throw new Exception("La clase no existe.");
 
-                        // ¡AUTORIZACIÓN!
                         if (classToDelete.Creator.Id != loggedInUser.Id)
                             throw new Exception("No tienes permiso para eliminar esta clase.");
                         
-                        // Verificamos si hay inscriptos 
                         if (inscriptionRepo.GetActiveClassByClassId(classId).Any())
                             throw new Exception("No se puede eliminar una clase con usuarios inscriptos.");
 
-                        // La clase de dominio ya verifica si ha comenzado o no
                         classToDelete.Eliminar(); 
                         
-                        // Si todas las validaciones pasan, la eliminamos del repositorio
                         classRepo.Delete(classId);
 
                         responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
@@ -506,7 +499,6 @@ namespace Server
                     if (classToAddImage.Creator.Id != loggedInUser.Id)
                         throw new Exception("No tienes permiso para modificar esta clase.");
 
-                    // --- Metadata ---
                     byte[] fileNameLengthBuffer = networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
                     int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
 
@@ -516,9 +508,8 @@ namespace Server
                     byte[] fileSizeBuffer = networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
                     long fileSize = BitConverter.ToInt64(fileSizeBuffer);
 
-                    // --- Definir carpeta ServerImages ---
                     string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
-                    Directory.CreateDirectory(imagesPath); // asegura que exista
+                    Directory.CreateDirectory(imagesPath); // asegura que exista la carpeta
                     string filePath = Path.Combine(imagesPath, fileName);
 
                     long offset = 0;
@@ -545,7 +536,7 @@ namespace Server
                             buffer = networkDataHelper.Receive((int)lastPartSize);
                             offset += lastPartSize;
                         }
-                        fsh.Write(filePath, buffer); // ahora usamos la ruta absoluta
+                        fsh.Write(filePath, buffer);
                         currentPart++;
                     }
 
@@ -554,6 +545,79 @@ namespace Server
                     classToAddImage.Image = fileName;
                     responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
                     break;
+                case ProtocolConstants.CommandDownloadImage:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para descargar imágenes.";
+                        break;
+                    }
+
+                    int classIdDownload = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                    OnlineClass classToDownload = classRepo.GetById(classIdDownload);
+                    if (classToDownload == null) throw new Exception("La clase no existe.");
+
+                    if (string.IsNullOrEmpty(classToDownload.Image))
+                    {
+                        responseMessage = "ERR|Esta clase no tiene portada.";
+                        break;
+                    }
+
+                    imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                    filePath = Path.Combine(imagesPath, classToDownload.Image);
+                    if (!File.Exists(filePath))
+                    {
+                        responseMessage = "ERR|El archivo de portada no se encontró en el servidor.";
+                        break;
+                    }
+
+                    FileInfo fi = new FileInfo(filePath);
+                    fileName = fi.Name;
+                    fileSize = fi.Length;
+
+               
+                    string metaPayload = $"{fileName}|{fileSize}";
+                    responseMessage = "OK|" + metaPayload;
+
+                   
+                    responseData = Encoding.UTF8.GetBytes(responseMessage);
+                    var metaFrame = new Frame
+                    {
+                        Header = ProtocolConstants.Response,
+                        Command = ProtocolConstants.CommandDownloadImage,
+                        Data = responseData
+                    };
+                    
+                    networkDataHelper.Send(metaFrame);
+                    
+                    fsh = new FileStreamHelper();
+                    offset = 0;
+                    partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                    currentPart = 1;
+
+                    while (offset < fileSize)
+                    {
+                        byte[] buffer;
+                        bool isLastPart = (currentPart == partCount);
+
+                        if (!isLastPart)
+                        {
+                            buffer = fsh.Read(filePath, offset, ProtocolConstants.MaxFilePartSize);
+                            offset += ProtocolConstants.MaxFilePartSize;
+                        }
+                        else
+                        {
+                            long lastPartSize = fileSize - offset;
+                            buffer = fsh.Read(filePath, offset, (int)lastPartSize);
+                            offset += lastPartSize;
+                        }
+
+                        networkDataHelper.Send(buffer);
+                        currentPart++;
+                    }
+                    
+
+                    Console.WriteLine($"Imagen '{fileName}' enviada al cliente.");
+                    return null;
 
 
                 case ProtocolConstants.CommandLogout:

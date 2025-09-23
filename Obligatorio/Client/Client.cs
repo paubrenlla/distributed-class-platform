@@ -138,6 +138,7 @@ namespace Client
                 Console.WriteLine("8. Buscar clases");
                 Console.WriteLine("9. Cerrar sesion");
                 Console.WriteLine("10. Salir de la Aplicación");
+                Console.WriteLine("11. Descargar portada");
                 Console.Write("Seleccione una opción: ");
 
                 string input = Console.ReadLine();
@@ -165,11 +166,9 @@ namespace Client
                         Console.Write("Fecha y hora de inicio (formato AAAA-MM-DD HH:MM): ");
                         string startDateStr = Console.ReadLine();
 
-                        // Pedimos la ruta de la imagen
                         Console.Write("Ruta de la imagen de la clase (dejar vacío si no se quiere ingresar imagen): ");
                         string imagePath = Console.ReadLine();
 
-                        // Enviamos primero los datos de la clase (payload sin imagen)
                         string payload = $"{name}|{desc}|{capacity}|{duration}|{startDateStr}";
                         Frame classFrame = new Frame
                         {
@@ -180,24 +179,21 @@ namespace Client
                         Frame classCreated = SendAndReceiveFrame(classFrame);
                         string classCreatedStr = Encoding.UTF8.GetString(classCreated.Data ?? new byte[0]).Trim();
 
-                        // Extraer ID robustamente: si el servidor responde "OK|<id>" usamos la parte después de '|'
                         int createdClassId = -1;
                         if (classCreatedStr.StartsWith("OK|"))
                         {
                             var p = classCreatedStr.Split('|', 2);
-                            // p[1] idealmente es el id; si p[1] contiene texto, intentamos extraer dígitos
                             if (int.TryParse(p.Length > 1 ? p[1].Trim() : "", out int tmpId1))
                                 createdClassId = tmpId1;
-                            else
+                            else // lo hacemos con linq por las dudas por si no llega a agarrar la id
                             {
-                                // última chance: extraer primer número con LINQ
+                                
                                 var digits = new string((p.Length > 1 ? p[1] : "").Where(ch => char.IsDigit(ch)).ToArray());
                                 int.TryParse(digits, out createdClassId);
                             }
                         }
                         else
                         {
-                            // Si el servidor devolvió sólo el ID sin "OK|", intentamos parsearlo directamente
                             int.TryParse(classCreatedStr, out createdClassId);
                         }
 
@@ -208,7 +204,6 @@ namespace Client
                             break;
                         }
 
-                        // Si el usuario ingresó una imagen, la enviamos
                         if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
                         {
                             FileInfo fi = new FileInfo(imagePath);
@@ -226,20 +221,15 @@ namespace Client
                                 Data = Encoding.UTF8.GetBytes("")
                             };
                             SendFrame(enviarImagen);
-                            // Enviar classId
                             _networkHelper.Send(BitConverter.GetBytes(createdClassId));
 
-                            // Enviar fileNameLength
                             _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
 
-                            // Enviar fileName
                             _networkHelper.Send(fileNameBytes);
 
-                            // Enviar fileSize
                             _networkHelper.Send(BitConverter.GetBytes(fileSize));
 
 
-                            // Ahora enviamos los datos en segmentos
                             long offset = 0;
                             long partCount = ProtocolConstants.CalculateFileParts(fileSize);
                             long currentPart = 1;
@@ -383,6 +373,81 @@ namespace Client
                         menuStatus = MenuStatus.Escape;
                         sessionRunning = false;
                         continue;
+                    case "11":
+                    {
+                        Console.Write("Ingresa el ID de la clase: ");
+                        string downloadId = Console.ReadLine();
+
+                        Frame downloadFrame = new Frame
+                        {
+                            Header = ProtocolConstants.Request,
+                            Command = ProtocolConstants.CommandDownloadImage,
+                            Data = Encoding.UTF8.GetBytes(downloadId)
+                        };
+
+                        _networkHelper.Send(downloadFrame);
+
+                        Frame metaFrame = _networkHelper.Receive();
+                        string metaStr = Encoding.UTF8.GetString(metaFrame.Data ?? new byte[0]);
+                        if (!metaStr.StartsWith("OK|"))
+                        {
+                            Console.WriteLine($"Error: {metaStr}");
+                            break;
+                        }
+
+                        string[] parts = metaStr.Substring(3).Split('|'); // "OK|filename|filesize"
+                        if (parts.Length < 2)
+                        {
+                            Console.WriteLine("Error en metadata recibida.");
+                            break;
+                        }
+
+                        string fileName = parts[0];
+                        long fileSize = long.Parse(parts[1]);
+
+                        string imagesPath = Path.Combine(AppContext.BaseDirectory, "ClienteImages");
+                        Directory.CreateDirectory(imagesPath);
+                        string filePath = Path.Combine(imagesPath, fileName);
+                        
+                        if (File.Exists(filePath))
+                        {
+                            File.Delete(filePath);
+                            Console.WriteLine($"Archivo existente '{fileName}' eliminado antes de descargar.");
+                        }
+
+                        long offset = 0;
+                        long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                        long currentPart = 1;
+
+                        FileStreamHelper fsh = new FileStreamHelper();
+
+                        while (offset < fileSize)
+                        {
+                            byte[] buffer;
+                            bool isLastPart = (currentPart == partCount);
+
+                            if (!isLastPart)
+                            {
+                                buffer = _networkHelper.Receive(ProtocolConstants.MaxFilePartSize);
+                                offset += ProtocolConstants.MaxFilePartSize;
+                            }
+                            else
+                            {
+                                long lastPartSize = fileSize - offset;
+                                buffer = _networkHelper.Receive((int)lastPartSize);
+                                offset += lastPartSize;
+                            }
+
+                            fsh.Write(filePath, buffer);
+                            currentPart++;
+                        }
+
+                        Console.WriteLine($"Imagen descargada en: {filePath}");
+                        requestFrame = null;
+                        break;
+                    }
+                        
+
                     default:
                         Console.WriteLine("Opción no válida. Intente de nuevo.");
                         continue;
