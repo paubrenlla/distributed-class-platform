@@ -302,8 +302,11 @@ namespace Server
                         foreach (var c in disponibles)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");                        }
+                            string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
+                        }
                         responseMessage = sb.ToString().TrimEnd('\n');
+
                     }
                     break;
                 }
@@ -335,7 +338,8 @@ namespace Server
                         foreach (var c in clases)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                            string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -368,7 +372,8 @@ namespace Server
                         foreach (var c in clases)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                            string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -402,7 +407,8 @@ namespace Server
                             foreach (var c in clases)
                             {
                                 var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                                string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
+                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
                             }
                             responseMessage = sb.ToString().TrimEnd('\n');
                         }
@@ -544,6 +550,8 @@ namespace Server
                     }
 
                     Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
+
+                    classToAddImage.Image = fileName;
                     responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
                     break;
 

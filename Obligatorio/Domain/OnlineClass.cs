@@ -19,7 +19,7 @@ namespace Domain
         public DateTimeOffset StartDate { get; private set; }
         public int Duration { get; private set; }
         public string Link { get; private set; }
-        public string Image { get; private set; } // ruta o nombre de archivo
+        public string Image { get; set; } // ruta o nombre de archivo
         public User Creator { get; private set; }
 
         
