@@ -105,14 +105,13 @@ namespace Client
 
                 if (requestFrame != null)
                 {
-                    // Usamos el helper para recibir la respuesta completa del servidor
                     Frame responseFrame = SendAndReceiveFrame(requestFrame);
                     string responseData = Encoding.UTF8.GetString(responseFrame.Data ?? new byte[0]);
 
                     if (requestFrame.Command == ProtocolConstants.CommandLogin && responseData.StartsWith("OK"))
                     {
                         ProcessSimpleResponse(responseData);
-                        return AuthResult.LoginSuccess; // Login exitoso
+                        return AuthResult.LoginSuccess; 
                     }
                     else
                     {
@@ -166,14 +165,113 @@ namespace Client
                         Console.Write("Fecha y hora de inicio (formato AAAA-MM-DD HH:MM): ");
                         string startDateStr = Console.ReadLine();
 
+                        // Pedimos la ruta de la imagen
+                        Console.Write("Ruta de la imagen de la clase (dejar vacío si no se quiere ingresar imagen): ");
+                        string imagePath = Console.ReadLine();
+
+                        // Enviamos primero los datos de la clase (payload sin imagen)
                         string payload = $"{name}|{desc}|{capacity}|{duration}|{startDateStr}";
-                
-                        requestFrame = new Frame
+                        Frame classFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
                             Command = ProtocolConstants.CommandCreateClass,
                             Data = Encoding.UTF8.GetBytes(payload)
                         };
+                        Frame classCreated = SendAndReceiveFrame(classFrame);
+                        string classCreatedStr = Encoding.UTF8.GetString(classCreated.Data ?? new byte[0]).Trim();
+
+                        // Extraer ID robustamente: si el servidor responde "OK|<id>" usamos la parte después de '|'
+                        int createdClassId = -1;
+                        if (classCreatedStr.StartsWith("OK|"))
+                        {
+                            var p = classCreatedStr.Split('|', 2);
+                            // p[1] idealmente es el id; si p[1] contiene texto, intentamos extraer dígitos
+                            if (int.TryParse(p.Length > 1 ? p[1].Trim() : "", out int tmpId1))
+                                createdClassId = tmpId1;
+                            else
+                            {
+                                // última chance: extraer primer número con LINQ
+                                var digits = new string((p.Length > 1 ? p[1] : "").Where(ch => char.IsDigit(ch)).ToArray());
+                                int.TryParse(digits, out createdClassId);
+                            }
+                        }
+                        else
+                        {
+                            // Si el servidor devolvió sólo el ID sin "OK|", intentamos parsearlo directamente
+                            int.TryParse(classCreatedStr, out createdClassId);
+                        }
+
+                        if (createdClassId <= 0)
+                        {
+                            Console.WriteLine("No se pudo obtener el ID de la clase creada. Se omitirá la subida de imagen.");
+                            requestFrame = null;
+                            break;
+                        }
+
+                        // Si el usuario ingresó una imagen, la enviamos
+                        if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                        {
+                            FileInfo fi = new FileInfo(imagePath);
+                            string fileName = fi.Name;
+                            byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
+                            int fileNameLength = fileNameBytes.Length;
+                            long fileSize = fi.Length;
+
+                            FileStreamHelper fsh = new FileStreamHelper();
+                            
+                            Frame enviarImagen = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandUploadImage,
+                                Data = Encoding.UTF8.GetBytes("")
+                            };
+                            SendFrame(enviarImagen);
+                            // Enviar classId
+                            _networkHelper.Send(BitConverter.GetBytes(createdClassId));
+
+                            // Enviar fileNameLength
+                            _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
+
+                            // Enviar fileName
+                            _networkHelper.Send(fileNameBytes);
+
+                            // Enviar fileSize
+                            _networkHelper.Send(BitConverter.GetBytes(fileSize));
+
+
+                            // Ahora enviamos los datos en segmentos
+                            long offset = 0;
+                            long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                            long currentPart = 1;
+
+                            while (offset < fileSize)
+                            {
+                                byte[] buffer;
+                                bool isLastPart = (currentPart == partCount);
+
+                                if (!isLastPart)
+                                {
+                                    buffer = fsh.Read(imagePath, offset, ProtocolConstants.MaxFilePartSize);
+                                    offset += ProtocolConstants.MaxFilePartSize;
+                                }
+                                else
+                                {
+                                    long lastPartSize = fileSize - offset;
+                                    buffer = fsh.Read(imagePath, offset, (int)lastPartSize);
+                                    offset += lastPartSize;
+                                }
+
+                                _networkHelper.Send(buffer);
+                                currentPart++;
+
+                            }
+
+                            Console.WriteLine("Imagen enviada correctamente.");
+                            Frame imageResponse = _networkHelper.Receive();
+                            string imageRespStr = Encoding.UTF8.GetString(imageResponse.Data ?? new byte[0]);
+                            ProcessSimpleResponse(imageRespStr);
+                        }
+                        requestFrame = null; // Para evitar que se vuelva a enviar al final del while
                         break;
                     case "3":
                         Console.Write("Ingresa el ID de la clase a la que quieres inscribirte: ");
@@ -266,7 +364,6 @@ namespace Client
                                 Console.WriteLine("Opción inválida.");
                                 break;
                         }
-                        // Asignamos el header
                         if(requestFrame != null) requestFrame.Header = ProtocolConstants.Request;
                         break;
                     case "9": // Cerrar Sesión
@@ -279,7 +376,7 @@ namespace Client
                         Frame response = SendAndReceiveFrame(requestFrame);
                         ProcessSimpleResponse(Encoding.UTF8.GetString(response.Data));
                         menuStatus = MenuStatus.LogOut;
-                        sessionRunning = false; // Termina el bucle del menú principal
+                        sessionRunning = false;
                         continue;
                     case "10": // Salir de la Aplicación
                         SendAndReceiveFrame(new Frame { Command = ProtocolConstants.CommandLogout, Header = ProtocolConstants.Request });
@@ -315,7 +412,19 @@ namespace Client
             }
         }
         
-        // Para mensajes simples como login, create user, etc.
+        private static void SendFrame(Frame frame)
+        {
+            try
+            {
+                _networkHelper.Send(frame);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error de comunicación: " + e.Message);
+                byte[] errorData = Encoding.UTF8.GetBytes("ERR|Error de red");
+            }
+        }
+        
         private static void ProcessSimpleResponse(string response)
         {
             var parts = response.Split(new[] { '|' }, 2);
@@ -333,7 +442,6 @@ namespace Client
 
             Console.WriteLine($"-> Status: {status}");
 
-            // Lista de comandos que deben ser mostrados como tabla de clases
             var classTableCommands = new short[]
             {
                 ProtocolConstants.CommandListClasses,
@@ -343,7 +451,6 @@ namespace Client
                 ProtocolConstants.SearchClassesByAvailabilty
             };
 
-            // Si el comando es uno de los que lista clases
             if (Array.Exists(classTableCommands, cmd => cmd == responseFrame.Command) && status == "OK")
             {
                 if (string.IsNullOrEmpty(data) || !data.Contains("|"))
@@ -352,7 +459,6 @@ namespace Client
                 }
                 else
                 {
-                    // Lógica para imprimir la tabla de clases
                     var classLines = data.Split('\n');
                     Console.WriteLine("  ID | Nombre            | Fecha de Inicio     | Cupos   | Portada");
                     Console.WriteLine("  ---|-------------------|---------------------|---------|---------");
@@ -370,7 +476,6 @@ namespace Client
             }
             else if (responseFrame.Command == ProtocolConstants.CommandShowHistory && status == "OK")
             {
-                // Lógica para imprimir la tabla del historial
                 if (string.IsNullOrEmpty(data) || !data.Contains("|"))
                 {
                     Console.WriteLine($"   Message: {data}");

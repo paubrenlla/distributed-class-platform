@@ -10,9 +10,8 @@ public static class ProtocolConstants
     public const int HeaderLength = 3;
     public const int CommandLength = 2;
     public const int DataLengthSize = 4;
-    public const int FixedHeaderSize = HeaderLength + CommandLength + DataLengthSize; // 9 bytes
+    public const int FixedHeaderSize = HeaderLength + CommandLength + DataLengthSize;
 
-    // Commands (2 bytes - short)
     // Rango 0-9: Autenticación y generales
     public const short CommandLogin = 1;
     public const short CommandLogout = 2;
@@ -30,6 +29,18 @@ public static class ProtocolConstants
     public const short SearchClassesByNamwe = 18;
     public const short SearchClassesByDescription = 19;
     public const short SearchClassesByAvailabilty = 20;
+    public const short CommandUploadImage = 30;
+
+    public const int MaxFilePartSize = 32768; // 32K
+    public const int FileNameLengthSize = 4;
+    public const int ClassIdSize = 4;
+    public const int FileLengthSize = 8;
+
+    public static long CalculateFileParts(long fileSize)
+    {
+        long fileParts = fileSize / MaxFilePartSize;
+        return fileParts * MaxFilePartSize == fileSize ? fileParts : fileParts + 1;
+    }
 
     
 }

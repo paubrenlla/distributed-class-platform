@@ -59,7 +59,7 @@ namespace Server
                     Console.WriteLine($"Client sent command: {receivedFrame.Command}");
 
                     // Pasamos 'loggedInUser' por referencia para que ProcessCommand pueda modificarlo.
-                    Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser); 
+                    Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser, networkDataHelper); 
             
                     networkDataHelper.Send(responseFrame);
                 }
@@ -83,10 +83,10 @@ namespace Server
             catch {}
         }
 
-        static Frame ProcessCommand(Frame frame, ref User loggedInUser) 
+        static Frame ProcessCommand(Frame frame, ref User loggedInUser, NetworkDataHelper networkDataHelper) 
         {
             byte[] responseData;
-            string responseMessage;
+            string responseMessage = null;
                     
             switch (frame.Command)
             {
@@ -184,7 +184,7 @@ namespace Server
                         var newClass = new OnlineClass(name, description, maxCapacity, startDate, duration, loggedInUser);
                         classRepo.Add(newClass);
 
-                        responseMessage = $"OK|Clase '{name}' creada con éxito con el ID: {newClass.Id}";
+                        responseMessage = $"OK|Clase creada con éxito con el ID: {newClass.Id}";
                     }
                     catch (FormatException)
                     {
@@ -302,8 +302,11 @@ namespace Server
                         foreach (var c in disponibles)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");                        }
+                            string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
+                        }
                         responseMessage = sb.ToString().TrimEnd('\n');
+
                     }
                     break;
                 }
@@ -335,7 +338,8 @@ namespace Server
                         foreach (var c in clases)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                            string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -368,7 +372,8 @@ namespace Server
                         foreach (var c in clases)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                            string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -402,7 +407,8 @@ namespace Server
                             foreach (var c in clases)
                             {
                                 var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                                string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
+                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
                             }
                             responseMessage = sb.ToString().TrimEnd('\n');
                         }
@@ -485,7 +491,71 @@ namespace Server
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
-                
+                case ProtocolConstants.CommandUploadImage:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para subir una imagen.";
+                        break;
+                    }
+
+                    byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
+                    int classIdImage = BitConverter.ToInt32(classIdImageBytes);
+                    OnlineClass classToAddImage = classRepo.GetById(classIdImage);
+                    if (classToAddImage == null) throw new Exception("La clase no existe.");
+
+                    if (classToAddImage.Creator.Id != loggedInUser.Id)
+                        throw new Exception("No tienes permiso para modificar esta clase.");
+
+                    // --- Metadata ---
+                    byte[] fileNameLengthBuffer = networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
+                    int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
+
+                    byte[] fileNameBytes = networkDataHelper.Receive(fileNameLength);
+                    string fileName = Encoding.UTF8.GetString(fileNameBytes);
+
+                    byte[] fileSizeBuffer = networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
+                    long fileSize = BitConverter.ToInt64(fileSizeBuffer);
+
+                    // --- Definir carpeta ServerImages ---
+                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                    Directory.CreateDirectory(imagesPath); // asegura que exista
+                    string filePath = Path.Combine(imagesPath, fileName);
+
+                    long offset = 0;
+                    long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                    long currentPart = 1;
+
+                    FileStreamHelper fsh = new FileStreamHelper();
+
+                    while (offset < fileSize)
+                    {
+                        byte[] buffer;
+                        bool isLastPart = (currentPart == partCount);
+
+                        if (!isLastPart)
+                        {
+                            Console.WriteLine($"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
+                            buffer = networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
+                            offset += ProtocolConstants.MaxFilePartSize;
+                        }
+                        else
+                        {
+                            long lastPartSize = fileSize - offset;
+                            Console.WriteLine($"Receiving segment #{currentPart} of size {lastPartSize}");
+                            buffer = networkDataHelper.Receive((int)lastPartSize);
+                            offset += lastPartSize;
+                        }
+                        fsh.Write(filePath, buffer); // ahora usamos la ruta absoluta
+                        currentPart++;
+                    }
+
+                    Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
+
+                    classToAddImage.Image = fileName;
+                    responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
+                    break;
+
+
                 case ProtocolConstants.CommandLogout:
                     if (loggedInUser == null)
                     {
