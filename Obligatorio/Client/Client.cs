@@ -408,6 +408,12 @@ namespace Client
                         string imagesPath = Path.Combine(AppContext.BaseDirectory, "ClienteImages");
                         Directory.CreateDirectory(imagesPath);
                         string filePath = Path.Combine(imagesPath, fileName);
+                        
+                        if (File.Exists(filePath))
+                        {
+                            File.Delete(filePath);
+                            Console.WriteLine($"Archivo existente '{fileName}' eliminado antes de descargar.");
+                        }
 
                         long offset = 0;
                         long partCount = ProtocolConstants.CalculateFileParts(fileSize);

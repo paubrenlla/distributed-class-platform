@@ -61,7 +61,8 @@ namespace Server
                     // Pasamos 'loggedInUser' por referencia para que ProcessCommand pueda modificarlo.
                     Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser, networkDataHelper); 
             
-                    networkDataHelper.Send(responseFrame);
+                    if(responseFrame !=null)
+                        networkDataHelper.Send(responseFrame);
                 }
                 catch (SocketException)
                 {
@@ -613,6 +614,7 @@ namespace Server
                         networkDataHelper.Send(buffer);
                         currentPart++;
                     }
+                    
 
                     Console.WriteLine($"Imagen '{fileName}' enviada al cliente.");
                     return null;
