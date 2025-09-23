@@ -29,7 +29,9 @@ public static class ProtocolConstants
     public const short SearchClassesByNamwe = 18;
     public const short SearchClassesByDescription = 19;
     public const short SearchClassesByAvailabilty = 20;
+   
     public const short CommandUploadImage = 30;
+    public const short CommandDownloadImage = 31;
 
     public const int MaxFilePartSize = 32768; // 32K
     public const int FileNameLengthSize = 4;
