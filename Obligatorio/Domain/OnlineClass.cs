@@ -21,6 +21,7 @@ namespace Domain
         public string Link { get; private set; }
         public string Image { get; private set; } // ruta o nombre de archivo
         public User Creator { get; private set; }
+
         
         public OnlineClass(
             string nombre,

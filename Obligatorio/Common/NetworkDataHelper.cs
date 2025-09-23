@@ -64,7 +64,7 @@ public class NetworkDataHelper
         return new Frame { Header = header, Command = command, Data = data };
     }
 
-    private void Send(byte[] buffer)
+    public void Send(byte[] buffer)
     {
         int length = buffer.Length;
         int offset = 0;
@@ -76,7 +76,7 @@ public class NetworkDataHelper
         }
     }
 
-    private byte[] Receive(int length)
+    public byte[] Receive(int length)
     {
         byte[] buffer = new byte[length];
         int offset = 0;
@@ -88,4 +88,15 @@ public class NetworkDataHelper
         }
         return buffer;
     }
+    
+    public void SendBytes(byte[] buffer)
+    {
+        Send(buffer);
+    }
+
+    public byte[] ReceiveBytes(int length)
+    {
+        return Receive(length);
+    }
+
 }
