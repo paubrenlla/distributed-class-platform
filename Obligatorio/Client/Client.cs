@@ -2,6 +2,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using Cliente;
 using Common;
 
 namespace Client
@@ -15,11 +16,22 @@ namespace Client
         static void Main(string[] args)
         {
             Console.WriteLine("Iniciando Cliente...");
-            Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
-            // TODO: Leer IP y Puerto desde un archivo de configuración
-            IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000);
-            
+            SettingsManager settingsMgr = new SettingsManager();
+
+            // IP y puerto del cliente
+            IPAddress clientIp = IPAddress.Parse(settingsMgr.ReadSetting(ClientConfig.ClientIpConfigKey));
+            int clientPort = int.Parse(settingsMgr.ReadSetting(ClientConfig.ClientPortConfigKey));
+            IPEndPoint localEndpoint = new IPEndPoint(clientIp, clientPort);
+
+            Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            clientSocket.Bind(localEndpoint);
+
+            // IP y puerto del servidor
+            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
+            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.SeverPortConfigKey));
+            IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
+
             try
             {
                 clientSocket.Connect(serverEndpoint);

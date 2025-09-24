@@ -24,12 +24,19 @@ namespace Server
             Console.WriteLine("Server starting with preloaded data...");
             Console.WriteLine("Starting Server Application..");
 
-            Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            // TODO: Leer IP y Puerto desde un archivo de configuración
-            IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000); 
+            SettingsManager settingsMgr = new SettingsManager();
 
+            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
+            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.SeverPortConfigKey));
+
+            IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
+
+            Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             serverSocket.Bind(serverEndpoint);
             serverSocket.Listen(10);
+
+            Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}...");
+
 
             Console.WriteLine("Waiting for clients to connect...");
 
