@@ -287,10 +287,9 @@ namespace Server
 
                     var disponibles = classRepo
                         .GetAll()
-                        .Where(c => DateTimeOffset.UtcNow < c.StartDate && (c.MaxCapacity - c.Inscribers) > 0)
-                        .OrderByDescending(c => c.MaxCapacity - c.Inscribers)
+                        .Where(c => DateTimeOffset.UtcNow < c.StartDate && (c.MaxCapacity - inscriptionRepo.GetActiveClassByClassId(c.Id).Count) > 0)
                         .ToList();
-
+                    
                     if (disponibles.Count == 0)
                     {
                         responseMessage = "OK|No hay clases disponibles por el momento.";
@@ -321,10 +320,8 @@ namespace Server
                     }
 
                     string filtroNombre = Encoding.UTF8.GetString(frame.Data);
-                    var clases = classRepo
-                        .GetAll()
+                    var clases = classRepo.GetAll()
                         .Where(c => c.Name.Contains(filtroNombre, StringComparison.OrdinalIgnoreCase))
-                        .OrderByDescending(c => c.MaxCapacity - c.Inscribers)
                         .ToList();
 
                     if (clases.Count == 0)
@@ -338,8 +335,7 @@ namespace Server
                         foreach (var c in clases)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -355,10 +351,8 @@ namespace Server
                     }
 
                     string filtroDesc = Encoding.UTF8.GetString(frame.Data);
-                    var clases = classRepo
-                        .GetAll()
+                    var clases = classRepo.GetAll()
                         .Where(c => c.Description.Contains(filtroDesc, StringComparison.OrdinalIgnoreCase))
-                        .OrderByDescending(c => c.MaxCapacity - c.Inscribers)
                         .ToList();
 
                     if (clases.Count == 0)
@@ -372,8 +366,7 @@ namespace Server
                         foreach (var c in clases)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
+                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -390,10 +383,8 @@ namespace Server
 
                     if (int.TryParse(Encoding.UTF8.GetString(frame.Data), out int minCupos))
                     {
-                        var clases = classRepo
-                            .GetAll()
-                            .Where(c => DateTimeOffset.UtcNow < c.StartDate && (c.MaxCapacity - c.Inscribers) > minCupos)
-                            .OrderByDescending(c => c.MaxCapacity - c.Inscribers)
+                        var clases = classRepo.GetAll()
+                            .Where(c => DateTimeOffset.UtcNow < c.StartDate && (c.MaxCapacity - inscriptionRepo.GetActiveClassByClassId(c.Id).Count) > minCupos)
                             .ToList();
 
                         if (clases.Count == 0)
@@ -407,8 +398,7 @@ namespace Server
                             foreach (var c in clases)
                             {
                                 var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                                string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
-                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
+                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                             }
                             responseMessage = sb.ToString().TrimEnd('\n');
                         }
