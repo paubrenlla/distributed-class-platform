@@ -52,15 +52,32 @@ namespace Domain
             Link = $"clase-{Id}-{Guid.NewGuid().ToString().Substring(0, 6)}";
         }
 
-        public void Modificar(string nuevoNombre, string nuevaDescripcion, int nuevoCupoMaximo, DateTimeOffset nuevaFechaHora, int nuevaDuracion, string nuevaImagen = null)
+        public void Modificar(string nuevoNombre, string nuevaDescripcion, string nuevoCupoMaximo, string nuevaFechaHora, string nuevaDuracion, int inscripcionesActuales, string nuevaImagen = null)
         {
             if (DateTimeOffset.UtcNow >= StartDate) throw new InvalidOperationException("No se puede modificar una clase que ya comenzó");
-
+            
             if (!string.IsNullOrWhiteSpace(nuevoNombre)) Name = nuevoNombre.Trim();
             if (!string.IsNullOrWhiteSpace(nuevaDescripcion)) Description = nuevaDescripcion.Trim();
-            if (nuevoCupoMaximo > 0) MaxCapacity = nuevoCupoMaximo;
-            if (nuevaDuracion > 0) Duration = nuevaDuracion;
-            StartDate = nuevaFechaHora;
+            if (!string.IsNullOrWhiteSpace(nuevoCupoMaximo))
+            {
+                int parsedCupoMaximo =  int.Parse(nuevoCupoMaximo);
+                if (parsedCupoMaximo < 1) throw new InvalidOperationException("Cupo maximo no puede ser menor que que 1");
+                if (parsedCupoMaximo < inscripcionesActuales) throw new InvalidOperationException("Cupo maximo no puede ser menor que que la cantidad actual de inscriptos");
+                MaxCapacity = parsedCupoMaximo;
+            }
+            if (!string.IsNullOrWhiteSpace(nuevaDuracion))
+            {
+                int parsedDuracion =  int.Parse(nuevaDuracion);
+                if (parsedDuracion < 1) throw new InvalidOperationException("Duracion no puede ser menor que que 1");
+                Duration = parsedDuracion;
+            }
+            if (!string.IsNullOrWhiteSpace(nuevaFechaHora))
+            {
+                DateTimeOffset parsedDate =  DateTimeOffset.Parse(nuevaFechaHora);
+                if (parsedDate < DateTimeOffset.Now) throw new InvalidOperationException("La fecha y hora no pueden ser anteriores a la actual");
+                StartDate = parsedDate;
+            }
+            
             Image = nuevaImagen;
         }
 
