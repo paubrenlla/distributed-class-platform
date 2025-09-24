@@ -439,13 +439,15 @@ namespace Server
                         if (classToModify.Creator.Id != loggedInUser.Id)
                             throw new Exception("No tienes permiso para modificar esta clase.");
 
+                        int activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId).Count;
+
                         string newName = parts[1];
                         string newDesc = parts[2];
-                        int newCapacity = int.Parse(parts[3]);
-                        int newDuration = int.Parse(parts[4]);
-                        DateTimeOffset newDate = DateTimeOffset.Parse(parts[5]);
+                        string newCapacity =  parts[3];
+                        string newDuration =  parts[4];
+                        string newDate =  parts[5];
                         
-                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, null); // Pasamos null para la imagen por ahora
+                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions, null); // Pasamos null para la imagen por ahora
                         
                         responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
                     }
