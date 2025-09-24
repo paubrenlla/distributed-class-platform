@@ -328,7 +328,7 @@ namespace Client
                         };
                         break;
                     case "8":
-                        Console.WriteLine("Selecciona el tipo de filtro: 1=Nombre, 2=Descripción, 3=Disponibilidad mínima de cupos 4=Todas las clases existentes");
+                        Console.WriteLine("Selecciona el tipo de filtro: 1=Nombre, 2=Descripción, 3=Disponibilidad mínima de cupos, 4=Todas las clases existentes");
                         string filtroTipo = Console.ReadLine()?.Trim();
                         switch (filtroTipo)
                         {
