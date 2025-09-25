@@ -216,62 +216,9 @@ namespace Client
                             break;
                         }
 
-                        if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                        if (!string.IsNullOrEmpty(imagePath))
                         {
-                            FileInfo fi = new FileInfo(imagePath);
-                            string fileName = fi.Name;
-                            byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
-                            int fileNameLength = fileNameBytes.Length;
-                            long fileSize = fi.Length;
-
-                            FileStreamHelper fsh = new FileStreamHelper();
-                            
-                            Frame enviarImagen = new Frame
-                            {
-                                Header = ProtocolConstants.Request,
-                                Command = ProtocolConstants.CommandUploadImage,
-                                Data = Encoding.UTF8.GetBytes("")
-                            };
-                            SendFrame(enviarImagen);
-                            _networkHelper.Send(BitConverter.GetBytes(createdClassId));
-
-                            _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
-
-                            _networkHelper.Send(fileNameBytes);
-
-                            _networkHelper.Send(BitConverter.GetBytes(fileSize));
-
-
-                            long offset = 0;
-                            long partCount = ProtocolConstants.CalculateFileParts(fileSize);
-                            long currentPart = 1;
-
-                            while (offset < fileSize)
-                            {
-                                byte[] buffer;
-                                bool isLastPart = (currentPart == partCount);
-
-                                if (!isLastPart)
-                                {
-                                    buffer = fsh.Read(imagePath, offset, ProtocolConstants.MaxFilePartSize);
-                                    offset += ProtocolConstants.MaxFilePartSize;
-                                }
-                                else
-                                {
-                                    long lastPartSize = fileSize - offset;
-                                    buffer = fsh.Read(imagePath, offset, (int)lastPartSize);
-                                    offset += lastPartSize;
-                                }
-
-                                _networkHelper.Send(buffer);
-                                currentPart++;
-
-                            }
-
-                            Console.WriteLine("Imagen enviada correctamente.");
-                            Frame imageResponse = _networkHelper.Receive();
-                            string imageRespStr = Encoding.UTF8.GetString(imageResponse.Data ?? new byte[0]);
-                            ProcessSimpleResponse(imageRespStr);
+                            UploadImage(imagePath, createdClassId);
                         }
                         requestFrame = null; // Para evitar que se vuelva a enviar al final del while
                         break;
@@ -318,6 +265,8 @@ namespace Client
                         string modDur = Console.ReadLine();
                         Console.Write("Nueva fecha (AAAA-MM-DD HH:MM): ");
                         string modDate = Console.ReadLine();
+                        Console.Write("Ruta de nueva imagen (vacío para no cambiar): ");
+                        string modImagePath = Console.ReadLine();
 
                         string modPayload = $"{modId}|{modName}|{modDesc}|{modCap}|{modDur}|{modDate}";
     
@@ -327,6 +276,14 @@ namespace Client
                             Command = ProtocolConstants.CommandModifyClass,
                             Data = Encoding.UTF8.GetBytes(modPayload)
                         };
+                        Frame modResponse = SendAndReceiveFrame(requestFrame);
+                        string modRespStr = Encoding.UTF8.GetString(modResponse.Data ?? new byte[0]);
+                        ProcessSimpleResponse(modRespStr);
+                        if (modRespStr.StartsWith("OK") && !string.IsNullOrEmpty(modImagePath))
+                        {
+                            UploadImage(modImagePath, int.Parse(modId));
+                        }
+                        requestFrame = null;
                         break;
                     case "7":
                         Console.Write("Ingresa el ID de la clase a eliminar: ");
@@ -578,5 +535,79 @@ namespace Client
                 Console.WriteLine($"   Message: {data}");
             }
         }
+        
+        private static void UploadImage(string imagePath, int classId)
+        {
+            if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
+            {
+                Console.WriteLine("No se encontró el archivo de imagen.");
+                return;
+            }
+
+            FileInfo fi = new FileInfo(imagePath);
+            string fileName = fi.Name;
+            byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
+            int fileNameLength = fileNameBytes.Length;
+            long fileSize = fi.Length;
+
+            FileStreamHelper fsh = new FileStreamHelper();
+
+            // 1. Avisamos al servidor que viene una subida
+            Frame enviarImagen = new Frame
+            {
+                Header = ProtocolConstants.Request,
+                Command = ProtocolConstants.CommandUploadImage,
+                Data = Encoding.UTF8.GetBytes("") // payload vacío solo para cumplir con el Frame
+            };
+            SendFrame(enviarImagen);
+
+            // 2. Mandamos metadata
+            _networkHelper.Send(BitConverter.GetBytes(classId));
+            _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
+            _networkHelper.Send(fileNameBytes);
+            _networkHelper.Send(BitConverter.GetBytes(fileSize));
+            
+            Frame metaResponse = _networkHelper.Receive();
+            string metaRespStr = Encoding.UTF8.GetString(metaResponse.Data ?? new byte[0]);
+            ProcessSimpleResponse(metaRespStr);
+
+            if (!metaRespStr.StartsWith("OK"))
+            {
+                return;
+            }
+
+            // 3. Mandamos los chunks del archivo
+            long offset = 0;
+            long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+            long currentPart = 1;
+
+            while (offset < fileSize)
+            {
+                byte[] buffer;
+                bool isLastPart = (currentPart == partCount);
+
+                if (!isLastPart)
+                {
+                    buffer = fsh.Read(imagePath, offset, ProtocolConstants.MaxFilePartSize);
+                    offset += ProtocolConstants.MaxFilePartSize;
+                }
+                else
+                {
+                    long lastPartSize = fileSize - offset;
+                    buffer = fsh.Read(imagePath, offset, (int)lastPartSize);
+                    offset += lastPartSize;
+                }
+
+                _networkHelper.Send(buffer);
+                currentPart++;
+            }
+
+            // 4. Esperamos respuesta del servidor
+            Frame imageResponse = _networkHelper.Receive();
+            string imageRespStr = Encoding.UTF8.GetString(imageResponse.Data ?? new byte[0]);
+            ProcessSimpleResponse(imageRespStr);
+        }
+
+        
     }
 }
