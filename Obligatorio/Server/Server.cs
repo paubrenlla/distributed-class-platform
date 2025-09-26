@@ -24,12 +24,19 @@ namespace Server
             Console.WriteLine("Server starting with preloaded data...");
             Console.WriteLine("Starting Server Application..");
 
-            Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            // TODO: Leer IP y Puerto desde un archivo de configuración
-            IPEndPoint serverEndpoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000); 
+            SettingsManager settingsMgr = new SettingsManager();
 
+            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
+            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.SeverPortConfigKey));
+
+            IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
+
+            Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             serverSocket.Bind(serverEndpoint);
             serverSocket.Listen(10);
+
+            Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}...");
+
 
             Console.WriteLine("Waiting for clients to connect...");
 
@@ -437,7 +444,7 @@ namespace Server
                         string newDuration =  parts[4];
                         string newDate =  parts[5];
                         
-                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions, null); // Pasamos null para la imagen por ahora
+                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions); // Pasamos null para la imagen por ahora
                         
                         responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
                     }
@@ -483,59 +490,108 @@ namespace Server
                         break;
                     }
 
-                    byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
-                    int classIdImage = BitConverter.ToInt32(classIdImageBytes);
-                    OnlineClass classToAddImage = classRepo.GetById(classIdImage);
-                    if (classToAddImage == null) throw new Exception("La clase no existe.");
-
-                    if (classToAddImage.Creator.Id != loggedInUser.Id)
-                        throw new Exception("No tienes permiso para modificar esta clase.");
-
-                    byte[] fileNameLengthBuffer = networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
-                    int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
-
-                    byte[] fileNameBytes = networkDataHelper.Receive(fileNameLength);
-                    string fileName = Encoding.UTF8.GetString(fileNameBytes);
-
-                    byte[] fileSizeBuffer = networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
-                    long fileSize = BitConverter.ToInt64(fileSizeBuffer);
-
-                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
-                    Directory.CreateDirectory(imagesPath); // asegura que exista la carpeta
-                    string filePath = Path.Combine(imagesPath, fileName);
-
-                    long offset = 0;
-                    long partCount = ProtocolConstants.CalculateFileParts(fileSize);
-                    long currentPart = 1;
-
-                    FileStreamHelper fsh = new FileStreamHelper();
-
-                    while (offset < fileSize)
+                    try
                     {
-                        byte[] buffer;
-                        bool isLastPart = (currentPart == partCount);
+                        byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
+                        int classIdImage = BitConverter.ToInt32(classIdImageBytes);
+                        OnlineClass classToAddImage = classRepo.GetById(classIdImage);
+                        if (classToAddImage == null) throw new Exception("La clase no existe.");
 
-                        if (!isLastPart)
+                        if (classToAddImage.Creator.Id != loggedInUser.Id)
+                            throw new Exception("No tienes permiso para modificar esta clase.");
+
+                        byte[] fileNameLengthBuffer = networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
+                        int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
+
+                        byte[] fileNameBytes = networkDataHelper.Receive(fileNameLength);
+                        string fileName = Encoding.UTF8.GetString(fileNameBytes);
+
+                        byte[] fileSizeBuffer = networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
+                        long fileSize = BitConverter.ToInt64(fileSizeBuffer);
+
+                        string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                        Directory.CreateDirectory(imagesPath); // asegura que exista la carpeta
+                        string filePath = Path.Combine(imagesPath, fileName);
+
+                        var otherClassWithSameImage = classRepo
+                            .GetAll()
+                            .FirstOrDefault(c => c.Id != classToAddImage.Id && c.Image == fileName);
+
+                        if (otherClassWithSameImage != null)
                         {
-                            Console.WriteLine($"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
-                            buffer = networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
-                            offset += ProtocolConstants.MaxFilePartSize;
+                            responseMessage =
+                                $"ERR|El nombre de imagen '{fileName}' ya está siendo usado por la clase {otherClassWithSameImage.Id}.";
+                            return new Frame
+                            {
+                                Header = ProtocolConstants.Response,
+                                Command = ProtocolConstants.CommandUploadImage,
+                                Data = Encoding.UTF8.GetBytes(responseMessage)
+                            };
                         }
-                        else
+                        responseMessage = "OK|Listo para recibir imagen";
+                        networkDataHelper.Send(new Frame
                         {
-                            long lastPartSize = fileSize - offset;
-                            Console.WriteLine($"Receiving segment #{currentPart} of size {lastPartSize}");
-                            buffer = networkDataHelper.Receive((int)lastPartSize);
-                            offset += lastPartSize;
+                            Header = ProtocolConstants.Response,
+                            Command = ProtocolConstants.CommandUploadImage,
+                            Data = Encoding.UTF8.GetBytes(responseMessage)
+                        });
+
+                        string oldImageName = classToAddImage.Image;
+
+                        if (File.Exists(filePath) && oldImageName == fileName)
+                        {
+                            File.Delete(filePath);
                         }
-                        fsh.Write(filePath, buffer);
-                        currentPart++;
+
+                        long offset = 0;
+                        long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                        long currentPart = 1;
+
+                        FileStreamHelper fsh = new FileStreamHelper();
+
+                        while (offset < fileSize)
+                        {
+                            byte[] buffer;
+                            bool isLastPart = (currentPart == partCount);
+
+                            if (!isLastPart)
+                            {
+                                Console.WriteLine(
+                                    $"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
+                                buffer = networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
+                                offset += ProtocolConstants.MaxFilePartSize;
+                            }
+                            else
+                            {
+                                long lastPartSize = fileSize - offset;
+                                Console.WriteLine($"Receiving segment #{currentPart} of size {lastPartSize}");
+                                buffer = networkDataHelper.Receive((int)lastPartSize);
+                                offset += lastPartSize;
+                            }
+
+                            fsh.Write(filePath, buffer);
+                            currentPart++;
+                        }
+
+                        if (!string.IsNullOrEmpty(oldImageName) && oldImageName != fileName)
+                        {
+                            string oldPath = Path.Combine(imagesPath, oldImageName);
+                            if (File.Exists(oldPath))
+                            {
+                                File.Delete(oldPath);
+                                Console.WriteLine($"Imagen anterior '{oldImageName}' eliminada.");
+                            }
+                        }
+
+                        Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
+
+                        classToAddImage.Image = fileName;
+                        responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
                     }
-
-                    Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
-
-                    classToAddImage.Image = fileName;
-                    responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
                     break;
                 case ProtocolConstants.CommandDownloadImage:
                     if (loggedInUser == null)
@@ -544,6 +600,9 @@ namespace Server
                         break;
                     }
 
+                    try
+                    {
+                        
                     int classIdDownload = int.Parse(Encoding.UTF8.GetString(frame.Data));
                     OnlineClass classToDownload = classRepo.GetById(classIdDownload);
                     if (classToDownload == null) throw new Exception("La clase no existe.");
@@ -554,8 +613,8 @@ namespace Server
                         break;
                     }
 
-                    imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
-                    filePath = Path.Combine(imagesPath, classToDownload.Image);
+                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                    string filePath = Path.Combine(imagesPath, classToDownload.Image);
                     if (!File.Exists(filePath))
                     {
                         responseMessage = "ERR|El archivo de portada no se encontró en el servidor.";
@@ -563,8 +622,8 @@ namespace Server
                     }
 
                     FileInfo fi = new FileInfo(filePath);
-                    fileName = fi.Name;
-                    fileSize = fi.Length;
+                    string fileName = fi.Name;
+                    long fileSize = fi.Length;
 
                
                     string metaPayload = $"{fileName}|{fileSize}";
@@ -581,10 +640,10 @@ namespace Server
                     
                     networkDataHelper.Send(metaFrame);
                     
-                    fsh = new FileStreamHelper();
-                    offset = 0;
-                    partCount = ProtocolConstants.CalculateFileParts(fileSize);
-                    currentPart = 1;
+                    FileStreamHelper fsh = new FileStreamHelper();
+                    long offset = 0;
+                    long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                    long currentPart = 1;
 
                     while (offset < fileSize)
                     {
@@ -609,6 +668,11 @@ namespace Server
                     
 
                     Console.WriteLine($"Imagen '{fileName}' enviada al cliente.");
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|{ex.Message}";
+                    }
                     return null;
 
 
