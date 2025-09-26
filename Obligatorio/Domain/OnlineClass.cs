@@ -28,8 +28,7 @@ namespace Domain
             int cupoMaximo,
             DateTimeOffset fechaHoraInicio,
             int duracionMinutos,
-            User creador,
-            string imagenPortada = null
+            User creador
         )
         {
             if (string.IsNullOrWhiteSpace(nombre)) throw new ArgumentException("Nombre requerido", nameof(nombre));
@@ -44,13 +43,12 @@ namespace Domain
             MaxCapacity = cupoMaximo;
             StartDate = fechaHoraInicio;
             Duration = duracionMinutos;
-            Image = imagenPortada;
             Creator = creador;
 
             Link = $"clase-{Id}-{Guid.NewGuid().ToString().Substring(0, 6)}";
         }
 
-        public void Modificar(string nuevoNombre, string nuevaDescripcion, string nuevoCupoMaximo, string nuevaFechaHora, string nuevaDuracion, int inscripcionesActuales, string nuevaImagen = null)
+        public void Modificar(string nuevoNombre, string nuevaDescripcion, string nuevoCupoMaximo, string nuevaFechaHora, string nuevaDuracion, int inscripcionesActuales)
         {
             if (DateTimeOffset.UtcNow >= StartDate) throw new InvalidOperationException("No se puede modificar una clase que ya comenzó");
             
@@ -75,8 +73,6 @@ namespace Domain
                 if (parsedDate < DateTimeOffset.Now) throw new InvalidOperationException("La fecha y hora no pueden ser anteriores a la actual");
                 StartDate = parsedDate;
             }
-            
-            Image = nuevaImagen;
         }
 
         public void Eliminar()

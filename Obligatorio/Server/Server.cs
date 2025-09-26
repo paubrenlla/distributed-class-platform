@@ -444,7 +444,7 @@ namespace Server
                         string newDuration =  parts[4];
                         string newDate =  parts[5];
                         
-                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions, null); // Pasamos null para la imagen por ahora
+                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions); // Pasamos null para la imagen por ahora
                         
                         responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
                     }
