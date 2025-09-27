@@ -14,6 +14,7 @@ namespace Server
         static UserRepository userRepo = new UserRepository();
         static readonly OnlineClassRepository classRepo = new OnlineClassRepository();
         static readonly InscriptionRepository inscriptionRepo = new InscriptionRepository();
+        public static readonly object GlobalLock = new object();
         
         static Program()
         {
@@ -212,26 +213,30 @@ namespace Server
                     try
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
-                        var classToJoin = classRepo.GetById(classId);
-                        if (classToJoin == null) throw new Exception("La clase no existe.");
+                        lock (Program.GlobalLock)
+                        {
+                            var classToJoin = classRepo.GetById(classId);
+                            if (classToJoin == null) throw new Exception("La clase no existe.");
 
-                        if(inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId) != null)
-                            throw new Exception("Ya estás inscrito en esta clase.");
+                            if (inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId) != null)
+                                throw new Exception("Ya estás inscrito en esta clase.");
 
-                        var activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId);
-                        if(activeInscriptions.Count >= classToJoin.MaxCapacity)
-                            throw new Exception("La clase no tiene cupos disponibles.");
+                            var activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId);
+                            if (activeInscriptions.Count >= classToJoin.MaxCapacity)
+                                throw new Exception("La clase no tiene cupos disponibles.");
 
-                        var newInscription = new Inscription(loggedInUser, classToJoin);
-                        inscriptionRepo.Add(newInscription);
+                            var newInscription = new Inscription(loggedInUser, classToJoin);
+                            inscriptionRepo.Add(newInscription);
 
-                        responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";
+                            responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";
+                        }
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
+
                 case ProtocolConstants.CommandCancelSubscription:
                     if (loggedInUser == null)
                     {
@@ -241,18 +246,21 @@ namespace Server
                     try
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
-                        
-                        var inscription = inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId);
-                        if (inscription == null) 
-                            throw new Exception("No estás inscrito en esta clase.");
+        
+                        lock (Program.GlobalLock)
+                        {
+                            var inscription = inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId);
+                            if (inscription == null) 
+                                throw new Exception("No estás inscrito en esta clase.");
 
-                        var remainingTime = inscription.Class.StartDate - DateTimeOffset.UtcNow;
-                        if (remainingTime.TotalMinutes < 2)
-                            throw new InvalidOperationException("No se puede cancelar la inscripción con menos de 2 minutos de antelación.");
+                            var remainingTime = inscription.Class.StartDate - DateTimeOffset.UtcNow;
+                            if (remainingTime.TotalMinutes < 2)
+                                throw new InvalidOperationException("No se puede cancelar la inscripción con menos de 2 minutos de antelación.");
 
-                        inscription.Cancel();
-                        
-                        responseMessage = $"OK|Tu inscripción a la clase '{inscription.Class.Name}' ha sido cancelada.";
+                            inscription.Cancel();
+            
+                            responseMessage = $"OK|Tu inscripción a la clase '{inscription.Class.Name}' ha sido cancelada.";
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -429,24 +437,27 @@ namespace Server
                         if (parts.Length < 6) throw new Exception("Datos incompletos para modificar la clase.");
 
                         int classId = int.Parse(parts[0]);
+                 
+                        lock (Program.GlobalLock) 
+                        {
+                            var classToModify = classRepo.GetById(classId);
+                            if (classToModify == null) throw new Exception("La clase no existe.");
+    
+                            if (classToModify.Creator.Id != loggedInUser.Id)
+                                throw new Exception("No tienes permiso para modificar esta clase.");
 
-                        var classToModify = classRepo.GetById(classId);
-                        if (classToModify == null) throw new Exception("La clase no existe.");
-        
-                        if (classToModify.Creator.Id != loggedInUser.Id)
-                            throw new Exception("No tienes permiso para modificar esta clase.");
+                            int activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId).Count;
 
-                        int activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId).Count;
+                            string newName = parts[1];
+                            string newDesc = parts[2];
+                            string newCapacity = parts[3];
+                            string newDuration = parts[4];
+                            string newDate = parts[5];
 
-                        string newName = parts[1];
-                        string newDesc = parts[2];
-                        string newCapacity = parts[3];
-                        string newDuration = parts[4];
-                        string newDate = parts[5];
+                            classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions);
 
-                        classRepo.ModifyClass(classId, newName, newDesc, newCapacity, newDuration, newDate, activeInscriptions);
-
-                        responseMessage = $"OK|Clase '{newName}' modificada con éxito.";
+                            responseMessage = $"OK|Clase '{newName}' modificada con éxito.";
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -463,20 +474,23 @@ namespace Server
                     try
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
-                        var classToDelete = classRepo.GetById(classId);
-                        if (classToDelete == null) throw new Exception("La clase no existe.");
+        
+                        lock (Program.GlobalLock)
+                        {
+                            var classToDelete = classRepo.GetById(classId);
+                            if (classToDelete == null) throw new Exception("La clase no existe.");
 
-                        if (classToDelete.Creator.Id != loggedInUser.Id)
-                            throw new Exception("No tienes permiso para eliminar esta clase.");
-                        
-                        if (inscriptionRepo.GetActiveClassByClassId(classId).Any())
-                            throw new Exception("No se puede eliminar una clase con usuarios inscriptos.");
+                            if (classToDelete.Creator.Id != loggedInUser.Id)
+                                throw new Exception("No tienes permiso para eliminar esta clase.");
+            
+                            if (inscriptionRepo.GetActiveClassByClassId(classId).Any())
+                                throw new Exception("No se puede eliminar una clase con usuarios inscriptos.");
 
-                        classToDelete.Eliminar(); 
-                        
-                        classRepo.Delete(classId);
+                            classToDelete.Eliminar(); 
+                            classRepo.Delete(classId);
 
-                        responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
+                            responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -492,101 +506,99 @@ namespace Server
 
                     try
                     {
-                        byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
-                        int classIdImage = BitConverter.ToInt32(classIdImageBytes);
-                        OnlineClass classToAddImage = classRepo.GetById(classIdImage);
-                        if (classToAddImage == null) throw new Exception("La clase no existe.");
-
-                        if (classToAddImage.Creator.Id != loggedInUser.Id)
-                            throw new Exception("No tienes permiso para modificar esta clase.");
-
-                        byte[] fileNameLengthBuffer = networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
-                        int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
-
-                        byte[] fileNameBytes = networkDataHelper.Receive(fileNameLength);
-                        string fileName = Encoding.UTF8.GetString(fileNameBytes);
-
-                        byte[] fileSizeBuffer = networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
-                        long fileSize = BitConverter.ToInt64(fileSizeBuffer);
-
-                        string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
-                        Directory.CreateDirectory(imagesPath); 
-                        string filePath = Path.Combine(imagesPath, fileName);
-
-                        try
+                        lock (Program.GlobalLock)
                         {
-                            classRepo.EnsureImageNameIsUnique(classToAddImage.Id, fileName);
-                        }
-                        catch (Exception ex)
-                        {
-                            responseMessage = $"ERR|{ex.Message}";
-                            return new Frame
+                            byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
+                            int classIdImage = BitConverter.ToInt32(classIdImageBytes);
+                            OnlineClass classToAddImage = classRepo.GetById(classIdImage);
+                            if (classToAddImage == null) throw new Exception("La clase no existe.");
+
+                            if (classToAddImage.Creator.Id != loggedInUser.Id)
+                                throw new Exception("No tienes permiso para modificar esta clase.");
+
+                            byte[] fileNameLengthBuffer = networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
+                            int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
+
+                            byte[] fileNameBytes = networkDataHelper.Receive(fileNameLength);
+                            string fileName = Encoding.UTF8.GetString(fileNameBytes);
+
+                            byte[] fileSizeBuffer = networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
+                            long fileSize = BitConverter.ToInt64(fileSizeBuffer);
+
+                            string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                            Directory.CreateDirectory(imagesPath);
+                            string filePath = Path.Combine(imagesPath, fileName);
+
+                            var otherClassWithSameImage = classRepo
+                                .GetAll()
+                                .FirstOrDefault(c => c.Id != classToAddImage.Id && c.Image == fileName);
+
+                            if (otherClassWithSameImage != null)
+                            {
+                                responseMessage =
+                                    $"ERR|El nombre de imagen '{fileName}' ya está siendo usado por la clase {otherClassWithSameImage.Id}.";
+                                return new Frame
+                                {
+                                    Header = ProtocolConstants.Response,
+                                    Command = ProtocolConstants.CommandUploadImage,
+                                    Data = Encoding.UTF8.GetBytes(responseMessage)
+                                };
+                            }
+
+                            responseMessage = "OK|Listo para recibir imagen";
+                            networkDataHelper.Send(new Frame
                             {
                                 Header = ProtocolConstants.Response,
                                 Command = ProtocolConstants.CommandUploadImage,
                                 Data = Encoding.UTF8.GetBytes(responseMessage)
-                            };
-                        }
+                            });
 
-                        responseMessage = "OK|Listo para recibir imagen";
-                        networkDataHelper.Send(new Frame
-                        {
-                            Header = ProtocolConstants.Response,
-                            Command = ProtocolConstants.CommandUploadImage,
-                            Data = Encoding.UTF8.GetBytes(responseMessage)
-                        });
+                            string oldImageName = classToAddImage.Image;
 
-                        string oldImageName = classToAddImage.Image;
+                            long offset = 0;
+                            long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                            long currentPart = 1;
 
-                        if (File.Exists(filePath) && oldImageName == fileName)
-                        {
-                            File.Delete(filePath); // sobreescribir
-                        }
+                            FileStreamHelper fsh = new FileStreamHelper();
 
-                        long offset = 0;
-                        long partCount = ProtocolConstants.CalculateFileParts(fileSize);
-                        long currentPart = 1;
-
-                        FileStreamHelper fsh = new FileStreamHelper();
-
-                        while (offset < fileSize)
-                        {
-                            byte[] buffer;
-                            bool isLastPart = (currentPart == partCount);
-
-                            if (!isLastPart)
+                            while (offset < fileSize)
                             {
-                                Console.WriteLine($"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
-                                buffer = networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
-                                offset += ProtocolConstants.MaxFilePartSize;
-                            }
-                            else
-                            {
-                                long lastPartSize = fileSize - offset;
-                                Console.WriteLine($"Receiving segment #{currentPart} of size {lastPartSize}");
-                                buffer = networkDataHelper.Receive((int)lastPartSize);
-                                offset += lastPartSize;
+                                byte[] buffer;
+                                bool isLastPart = (currentPart == partCount);
+
+                                if (!isLastPart)
+                                {
+                                    Console.WriteLine($"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
+                                    buffer = networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
+                                    offset += ProtocolConstants.MaxFilePartSize;
+                                }
+                                else
+                                {
+                                    long lastPartSize = fileSize - offset;
+                                    Console.WriteLine($"Receiving segment #{currentPart} of size {lastPartSize}");
+                                    buffer = networkDataHelper.Receive((int)lastPartSize);
+                                    offset += lastPartSize;
+                                }
+
+                                fsh.Write(filePath, buffer);
+                                currentPart++;
                             }
 
-                            fsh.Write(filePath, buffer);
-                            currentPart++;
-                        }
-
-                        Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
-
-                        classRepo.UpdateImage(classToAddImage.Id, fileName);
-
-                        if (!string.IsNullOrEmpty(oldImageName) && oldImageName != fileName)
-                        {
-                            string oldPath = Path.Combine(imagesPath, oldImageName);
-                            if (File.Exists(oldPath))
+                            if (!string.IsNullOrEmpty(oldImageName) && oldImageName != fileName)
                             {
-                                File.Delete(oldPath);
-                                Console.WriteLine($"Imagen anterior '{oldImageName}' eliminada.");
+                                string oldPath = Path.Combine(imagesPath, oldImageName);
+                                if (File.Exists(oldPath))
+                                {
+                                    File.Delete(oldPath);
+                                    Console.WriteLine($"Imagen anterior '{oldImageName}' eliminada.");
+                                }
                             }
-                        }
 
-                        responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
+                            Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
+                            classToAddImage.Image = fileName;
+
+                            responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -603,11 +615,9 @@ namespace Server
 
                     try
                     {
-                        
-                    int classIdDownload = int.Parse(Encoding.UTF8.GetString(frame.Data));
-                    OnlineClass classToDownload = classRepo.GetById(classIdDownload);
-                    if (classToDownload == null) throw new Exception("La clase no existe.");
-
+                        int classIdDownload = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                        OnlineClass classToDownload = classRepo.GetById(classIdDownload);
+                        if (classToDownload == null) throw new Exception("La clase no existe.");
                     if (string.IsNullOrEmpty(classToDownload.Image))
                     {
                         responseMessage = "ERR|Esta clase no tiene portada.";
