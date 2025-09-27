@@ -8,15 +8,20 @@ namespace Repository
     public class UserRepository
     {
         private readonly List<User> _usuarios = new List<User>();
+        private readonly object _lock = new object();
 
         public User Add(User usuario)
         {
             if (usuario == null) throw new ArgumentNullException(nameof(usuario));
-            if (_usuarios.Any(u => u.Username == usuario.Username))
-                throw new InvalidOperationException("Ya existe un usuario con ese username");
 
-            _usuarios.Add(usuario);
-            return usuario;
+            lock (_lock)
+            {
+                if (_usuarios.Any(u => u.Username == usuario.Username))
+                    throw new InvalidOperationException("Ya existe un usuario con ese username");
+
+                _usuarios.Add(usuario);
+                return usuario;
+            }
         }
 
         public User GetById(int id)
@@ -26,7 +31,10 @@ namespace Repository
 
         public User GetByUsername(string username)
         {
-            return _usuarios.FirstOrDefault(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+            lock (_lock)
+            {
+                return _usuarios.FirstOrDefault(u => u.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+            }
         }
 
         public List<User> GetAll()
@@ -36,13 +44,14 @@ namespace Repository
 
         public void Update(User usuario)
         {
-            var existing = GetById(usuario.Id);
+            var existing =_usuarios.FirstOrDefault(u => u.Id == usuario.Id);
+
             if (existing == null) throw new InvalidOperationException("Usuario no encontrado");
         }
 
         public void Delete(int id)
         {
-            var usuario = GetById(id);
+            var usuario = _usuarios.FirstOrDefault(u => u.Id == id);
             if (usuario == null) throw new InvalidOperationException("Usuario no encontrado");
 
             _usuarios.Remove(usuario);

@@ -8,22 +8,32 @@ namespace Repository
     public class OnlineClassRepository
     {
         private readonly List<OnlineClass> _clases = new List<OnlineClass>();
+        private readonly object _lock = new object();
 
         public OnlineClass Add(OnlineClass clase)
         {
             if (clase == null) throw new ArgumentNullException(nameof(clase));
-            _clases.Add(clase);
-            return clase;
+            lock (_lock)
+            {
+                _clases.Add(clase);
+                return clase;
+            }
         }
 
         public OnlineClass GetById(int id)
         {
-            return _clases.FirstOrDefault(c => c.Id == id);
+            lock (_lock)
+            {
+                return _clases.FirstOrDefault(c => c.Id == id);
+            }
         }
 
         public List<OnlineClass> GetAll()
         {
-            return new List<OnlineClass>(_clases);
+            lock (_lock)
+            {
+                return new List<OnlineClass>(_clases);
+            }
         }
 
         public List<OnlineClass> SearchByKeyword(string keyword)
@@ -34,18 +44,51 @@ namespace Repository
                 .ToList();
         }
 
-        public void Update(OnlineClass clase)
+        public void ModifyClass(int classId, string newName, string newDesc, string newCapacity,
+            string newDuration, string newDate, int inscripcionesActuales)
         {
-            var existing = GetById(clase.Id);
-            if (existing == null) throw new InvalidOperationException("Clase no encontrada");
+            lock (_lock)
+            {
+                var clase = _clases.FirstOrDefault(c => c.Id == classId);
+                if (clase == null) throw new InvalidOperationException("Clase no encontrada");
+
+                clase.Modificar(newName, newDesc, newCapacity, newDate, newDuration, inscripcionesActuales);
+            }
         }
+
 
         public void Delete(int id)
         {
-            var clase = GetById(id);
-            if (clase == null) throw new InvalidOperationException("Clase no encontrada");
+            lock (_lock)
+            {
+                var clase = GetById(id);
+                if (clase == null)
+                    throw new InvalidOperationException("Clase no encontrada");
 
-            _clases.Remove(clase);
+                _clases.Remove(clase);
+            }
         }
+
+        public void EnsureImageNameIsUnique(int classId, string fileName)
+        {
+            lock (_lock)
+            {
+                var conflict = _clases.Any(c => c.Id != classId && c.Image == fileName);
+                if (conflict)
+                    throw new InvalidOperationException($"El nombre de imagen '{fileName}' ya está siendo usado");
+            }
+        }
+
+        public void UpdateImage(int classId, string newFileName)
+        {
+            lock (_lock)
+            {
+                var clase = _clases.FirstOrDefault(c => c.Id == classId);
+                if (clase == null) throw new InvalidOperationException("Clase no encontrada");
+
+                clase.Image = newFileName;
+            }
+        }
+
     }
 }

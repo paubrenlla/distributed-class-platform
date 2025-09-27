@@ -43,7 +43,7 @@ public class NetworkDataHelper
             Buffer.BlockCopy(frame.Data, 0, packet, ProtocolConstants.FixedHeaderSize, frame.Data.Length);
         }
         
-        // Enviar el paquete completo usando el método Send original
+        // Envia el paquete completo usando el método Send original
         Send(packet);
     }
     

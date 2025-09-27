@@ -158,7 +158,7 @@ namespace Client
 
                 switch (input)
                 {
-                    case "1":
+                    case "1": //Listar todas las clases disponibles
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
@@ -166,7 +166,7 @@ namespace Client
                             Data = null
                         };
                         break;
-                    case "2":
+                    case "2": //Crear una clase
                         Console.Write("Nombre de la clase: ");
                         string name = Console.ReadLine();
                         Console.Write("Descripción: ");
@@ -222,7 +222,7 @@ namespace Client
                         }
                         requestFrame = null; // Para evitar que se vuelva a enviar al final del while
                         break;
-                    case "3":
+                    case "3": //Inscribirse a una clase
                         Console.Write("Ingresa el ID de la clase a la que quieres inscribirte: ");
                         string classId = Console.ReadLine();
     
@@ -233,7 +233,7 @@ namespace Client
                             Data = Encoding.UTF8.GetBytes(classId)
                         };
                         break;
-                    case "4":
+                    case "4": //Cancelar inscripción
                         Console.Write("Ingresa el ID de la clase para cancelar tu inscripción: ");
                         string classIdToCancel = Console.ReadLine();
 
@@ -244,7 +244,7 @@ namespace Client
                             Data = Encoding.UTF8.GetBytes(classIdToCancel)
                         };
                         break;
-                    case "5":
+                    case "5": //Ver mi historial de actividades
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
@@ -252,7 +252,7 @@ namespace Client
                             Data = null 
                         };
                         break;
-                    case "6":
+                    case "6": //Modificar una clase (creador)
                         Console.Write("Ingresa el ID de la clase a modificar: ");
                         string modId = Console.ReadLine();
                         Console.Write("Nuevo nombre: ");
@@ -285,7 +285,7 @@ namespace Client
                         }
                         requestFrame = null;
                         break;
-                    case "7":
+                    case "7": //Eliminar una clase (creador)
                         Console.Write("Ingresa el ID de la clase a eliminar: ");
                         string deleteId = Console.ReadLine();
     
@@ -296,7 +296,7 @@ namespace Client
                             Data = Encoding.UTF8.GetBytes(deleteId)
                         };
                         break;
-                    case "8":
+                    case "8": //Buscar clases
                         Console.WriteLine("Selecciona el tipo de filtro: 1=Nombre, 2=Descripción, 3=Disponibilidad mínima de cupos, 4=Todas las clases existentes");
                         string filtroTipo = Console.ReadLine()?.Trim();
                         switch (filtroTipo)
@@ -342,7 +342,7 @@ namespace Client
                         menuStatus = MenuStatus.Escape;
                         sessionRunning = false;
                         continue;
-                    case "11":
+                    case "11": //Descargar protada
                     {
                         Console.Write("Ingresa el ID de la clase: ");
                         string downloadId = Console.ReadLine();
@@ -551,17 +551,14 @@ namespace Client
             long fileSize = fi.Length;
 
             FileStreamHelper fsh = new FileStreamHelper();
-
-            // 1. Avisamos al servidor que viene una subida
             Frame enviarImagen = new Frame
             {
                 Header = ProtocolConstants.Request,
                 Command = ProtocolConstants.CommandUploadImage,
-                Data = Encoding.UTF8.GetBytes("") // payload vacío solo para cumplir con el Frame
+                Data = Encoding.UTF8.GetBytes("")
             };
             SendFrame(enviarImagen);
 
-            // 2. Mandamos metadata
             _networkHelper.Send(BitConverter.GetBytes(classId));
             _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
             _networkHelper.Send(fileNameBytes);
@@ -576,7 +573,6 @@ namespace Client
                 return;
             }
 
-            // 3. Mandamos los chunks del archivo
             long offset = 0;
             long partCount = ProtocolConstants.CalculateFileParts(fileSize);
             long currentPart = 1;
@@ -602,7 +598,6 @@ namespace Client
                 currentPart++;
             }
 
-            // 4. Esperamos respuesta del servidor
             Frame imageResponse = _networkHelper.Receive();
             string imageRespStr = Encoding.UTF8.GetString(imageResponse.Data ?? new byte[0]);
             ProcessSimpleResponse(imageRespStr);

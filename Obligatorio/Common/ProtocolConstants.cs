@@ -33,7 +33,7 @@ public static class ProtocolConstants
     public const short CommandUploadImage = 30;
     public const short CommandDownloadImage = 31;
 
-    public const int MaxFilePartSize = 32768; // 32K
+    public const int MaxFilePartSize = 32768;
     public const int FileNameLengthSize = 4;
     public const int ClassIdSize = 4;
     public const int FileLengthSize = 8;
