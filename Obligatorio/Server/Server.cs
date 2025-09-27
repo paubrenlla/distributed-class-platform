@@ -492,7 +492,6 @@ namespace Server
 
                     try
                     {
-                        // --- 1. Recibir metadata ---
                         byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
                         int classIdImage = BitConverter.ToInt32(classIdImageBytes);
                         OnlineClass classToAddImage = classRepo.GetById(classIdImage);
@@ -514,7 +513,6 @@ namespace Server
                         Directory.CreateDirectory(imagesPath); 
                         string filePath = Path.Combine(imagesPath, fileName);
 
-                        // --- 2. Validar unicidad del nombre ---
                         try
                         {
                             classRepo.EnsureImageNameIsUnique(classToAddImage.Id, fileName);
@@ -530,7 +528,6 @@ namespace Server
                             };
                         }
 
-                        // --- 3. Avisar al cliente que puede mandar la imagen ---
                         responseMessage = "OK|Listo para recibir imagen";
                         networkDataHelper.Send(new Frame
                         {
@@ -539,12 +536,11 @@ namespace Server
                             Data = Encoding.UTF8.GetBytes(responseMessage)
                         });
 
-                        // --- 4. Recibir archivo ---
                         string oldImageName = classToAddImage.Image;
 
                         if (File.Exists(filePath) && oldImageName == fileName)
                         {
-                            File.Delete(filePath); // sobreescribir si es el mismo archivo
+                            File.Delete(filePath); // sobreescribir
                         }
 
                         long offset = 0;
@@ -578,10 +574,8 @@ namespace Server
 
                         Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
 
-                        // --- 5. Actualizar repo bajo lock ---
                         classRepo.UpdateImage(classToAddImage.Id, fileName);
 
-                        // --- 6. Eliminar la anterior si corresponde ---
                         if (!string.IsNullOrEmpty(oldImageName) && oldImageName != fileName)
                         {
                             string oldPath = Path.Combine(imagesPath, oldImageName);
