@@ -551,17 +551,14 @@ namespace Client
             long fileSize = fi.Length;
 
             FileStreamHelper fsh = new FileStreamHelper();
-
-            // 1. Avisamos al servidor que viene una subida
             Frame enviarImagen = new Frame
             {
                 Header = ProtocolConstants.Request,
                 Command = ProtocolConstants.CommandUploadImage,
-                Data = Encoding.UTF8.GetBytes("") // payload vacío solo para cumplir con el Frame
+                Data = Encoding.UTF8.GetBytes("")
             };
             SendFrame(enviarImagen);
 
-            // 2. Mandamos metadata
             _networkHelper.Send(BitConverter.GetBytes(classId));
             _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
             _networkHelper.Send(fileNameBytes);
@@ -576,7 +573,6 @@ namespace Client
                 return;
             }
 
-            // 3. Mandamos los chunks del archivo
             long offset = 0;
             long partCount = ProtocolConstants.CalculateFileParts(fileSize);
             long currentPart = 1;
@@ -602,7 +598,6 @@ namespace Client
                 currentPart++;
             }
 
-            // 4. Esperamos respuesta del servidor
             Frame imageResponse = _networkHelper.Receive();
             string imageRespStr = Encoding.UTF8.GetString(imageResponse.Data ?? new byte[0]);
             ProcessSimpleResponse(imageRespStr);

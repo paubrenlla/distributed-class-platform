@@ -424,15 +424,15 @@ namespace Server
                     }
                     try
                     {
-                        // Formato esperado: IDClase|NuevoNombre|NuevaDesc|NuevoCupo|NuevaDuracion|NuevaFecha
                         string payload = Encoding.UTF8.GetString(frame.Data);
                         var parts = payload.Split('|');
                         if (parts.Length < 6) throw new Exception("Datos incompletos para modificar la clase.");
 
                         int classId = int.Parse(parts[0]);
+
                         var classToModify = classRepo.GetById(classId);
                         if (classToModify == null) throw new Exception("La clase no existe.");
-                        
+        
                         if (classToModify.Creator.Id != loggedInUser.Id)
                             throw new Exception("No tienes permiso para modificar esta clase.");
 
@@ -440,13 +440,13 @@ namespace Server
 
                         string newName = parts[1];
                         string newDesc = parts[2];
-                        string newCapacity =  parts[3];
-                        string newDuration =  parts[4];
-                        string newDate =  parts[5];
-                        
-                        classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions); // Pasamos null para la imagen por ahora
-                        
-                        responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
+                        string newCapacity = parts[3];
+                        string newDuration = parts[4];
+                        string newDate = parts[5];
+
+                        classRepo.ModifyClass(classId, newName, newDesc, newCapacity, newDuration, newDate, activeInscriptions);
+
+                        responseMessage = $"OK|Clase '{newName}' modificada con éxito.";
                     }
                     catch (Exception ex)
                     {
@@ -492,6 +492,7 @@ namespace Server
 
                     try
                     {
+                        // --- 1. Recibir metadata ---
                         byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
                         int classIdImage = BitConverter.ToInt32(classIdImageBytes);
                         OnlineClass classToAddImage = classRepo.GetById(classIdImage);
@@ -510,17 +511,17 @@ namespace Server
                         long fileSize = BitConverter.ToInt64(fileSizeBuffer);
 
                         string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
-                        Directory.CreateDirectory(imagesPath); // asegura que exista la carpeta
+                        Directory.CreateDirectory(imagesPath); 
                         string filePath = Path.Combine(imagesPath, fileName);
 
-                        var otherClassWithSameImage = classRepo
-                            .GetAll()
-                            .FirstOrDefault(c => c.Id != classToAddImage.Id && c.Image == fileName);
-
-                        if (otherClassWithSameImage != null)
+                        // --- 2. Validar unicidad del nombre ---
+                        try
                         {
-                            responseMessage =
-                                $"ERR|El nombre de imagen '{fileName}' ya está siendo usado por la clase {otherClassWithSameImage.Id}.";
+                            classRepo.EnsureImageNameIsUnique(classToAddImage.Id, fileName);
+                        }
+                        catch (Exception ex)
+                        {
+                            responseMessage = $"ERR|{ex.Message}";
                             return new Frame
                             {
                                 Header = ProtocolConstants.Response,
@@ -528,6 +529,8 @@ namespace Server
                                 Data = Encoding.UTF8.GetBytes(responseMessage)
                             };
                         }
+
+                        // --- 3. Avisar al cliente que puede mandar la imagen ---
                         responseMessage = "OK|Listo para recibir imagen";
                         networkDataHelper.Send(new Frame
                         {
@@ -536,11 +539,12 @@ namespace Server
                             Data = Encoding.UTF8.GetBytes(responseMessage)
                         });
 
+                        // --- 4. Recibir archivo ---
                         string oldImageName = classToAddImage.Image;
 
                         if (File.Exists(filePath) && oldImageName == fileName)
                         {
-                            File.Delete(filePath);
+                            File.Delete(filePath); // sobreescribir si es el mismo archivo
                         }
 
                         long offset = 0;
@@ -556,8 +560,7 @@ namespace Server
 
                             if (!isLastPart)
                             {
-                                Console.WriteLine(
-                                    $"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
+                                Console.WriteLine($"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
                                 buffer = networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
                                 offset += ProtocolConstants.MaxFilePartSize;
                             }
@@ -573,6 +576,12 @@ namespace Server
                             currentPart++;
                         }
 
+                        Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
+
+                        // --- 5. Actualizar repo bajo lock ---
+                        classRepo.UpdateImage(classToAddImage.Id, fileName);
+
+                        // --- 6. Eliminar la anterior si corresponde ---
                         if (!string.IsNullOrEmpty(oldImageName) && oldImageName != fileName)
                         {
                             string oldPath = Path.Combine(imagesPath, oldImageName);
@@ -583,9 +592,6 @@ namespace Server
                             }
                         }
 
-                        Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
-
-                        classToAddImage.Image = fileName;
                         responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
                     }
                     catch (Exception ex)
@@ -593,6 +599,7 @@ namespace Server
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
+
                 case ProtocolConstants.CommandDownloadImage:
                     if (loggedInUser == null)
                     {
