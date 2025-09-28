@@ -15,87 +15,166 @@ namespace Server
         static readonly OnlineClassRepository classRepo = new OnlineClassRepository();
         static readonly InscriptionRepository inscriptionRepo = new InscriptionRepository();
         public static readonly object GlobalLock = new object();
-        
-        static Program()
-        {
-            SeedData();
-        }
+        static bool isRunning = true;
+        static Socket serverSocket;
+        static readonly List<Socket> connectedClients = new List<Socket>();
+        static readonly object clientListLock = new object();
+        static int maxClients = 3;
+
         static void Main(string[] args)
         {
+            SeedData();
             Console.WriteLine("Server starting with preloaded data...");
-            Console.WriteLine("Starting Server Application..");
-
             SettingsManager settingsMgr = new SettingsManager();
 
             IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
             int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.SeverPortConfigKey));
-
             IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
 
-            Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             serverSocket.Bind(serverEndpoint);
             serverSocket.Listen(10);
 
             Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}...");
 
+            Thread acceptThread = new Thread(AcceptClients);
+            acceptThread.Start();
 
-            Console.WriteLine("Waiting for clients to connect...");
-
-            // TODO: Implementar un mecanismo de cierre controlado
-            while (true) 
+            while (isRunning)
             {
-                Socket clientSocket = serverSocket.Accept();
-                Thread t = new Thread(() => HandleClient(clientSocket));
-                t.Start();
+                string command = Console.ReadLine();
+                if (command?.Equals("exit", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    Console.WriteLine("Cerrando servidor de forma controlada...");
+                    isRunning = false;
+
+                    serverSocket.Close();
+
+                    lock (clientListLock)
+                    {
+                        foreach (var client in connectedClients)
+                        {
+                            try { client.Shutdown(SocketShutdown.Both); } catch { }
+                            client.Close();
+                        }
+                        connectedClients.Clear();
+                    }
+
+                    break;
+                }
+            }
+
+            Console.WriteLine("Servidor cerrado.");
+        }
+
+        static void AcceptClients()
+        {
+            try
+            {
+                while (isRunning)
+                {
+                    Socket clientSocket = serverSocket.Accept();
+
+                    lock (clientListLock)
+                    {
+                        if (connectedClients.Count >= maxClients)
+                        {
+                            Console.WriteLine("Rechazando cliente: límite máximo alcanzado.");
+                            clientSocket.Close();
+                            continue;
+                        }
+
+                        connectedClients.Add(clientSocket);
+                    }
+
+                    Console.WriteLine($"Cliente conectado ({connectedClients.Count}/{maxClients})");
+
+                    Thread t = new Thread(() =>
+                    {
+                        HandleClient(clientSocket);
+                        lock (clientListLock)
+                            connectedClients.Remove(clientSocket);
+                    });
+                    t.Start();
+                }
+            }
+            catch (SocketException)
+            {
+                if (isRunning)
+                    Console.WriteLine("Error inesperado en Accept().");
+                else
+                    Console.WriteLine("Accept() terminó porque el servidor se cerró.");
             }
         }
 
+
         static void HandleClient(Socket clientSocket)
         {
-            Console.WriteLine("Client connected: " + clientSocket.RemoteEndPoint);
+            string clientId;
+            try
+            {
+                clientId = clientSocket.RemoteEndPoint?.ToString() ?? "desconocido";
+            }
+            catch
+            {
+                clientId = "desconocido";
+            }
+
+            Console.WriteLine("Client connected: " + clientId);
+
             bool clientActive = true;
             NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
-    
-            // Esta variable mantendrá el estado para esta conexión de cliente específica.
-            User loggedInUser = null; 
+
+            User loggedInUser = null;
 
             while (clientActive)
             {
                 try
                 {
                     Frame receivedFrame = networkDataHelper.Receive();
-                    Console.WriteLine($"Client sent command: {receivedFrame.Command}");
+                    Console.WriteLine($"Client {clientId} sent command: {receivedFrame.Command}");
 
-                    // Pasamos 'loggedInUser' por referencia para que ProcessCommand pueda modificarlo.
-                    Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser, networkDataHelper); 
-            
-                    if(responseFrame !=null)
+                    Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser, networkDataHelper);
+                    if (responseFrame != null)
                         networkDataHelper.Send(responseFrame);
                 }
                 catch (SocketException)
                 {
                     clientActive = false;
                 }
+                catch (ObjectDisposedException)
+                {
+                    clientActive = false; // cierre controlado
+                }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Error processing client request: " + ex.Message);
-                    clientActive = false; 
+                    Console.WriteLine($"Error processing client {clientId} request: {ex.Message}");
+                    clientActive = false;
                 }
             }
 
-            Console.WriteLine("Client disconnected: " + clientSocket.RemoteEndPoint);
             try
             {
+                Console.WriteLine("Client disconnected: " + clientId);
                 clientSocket.Shutdown(SocketShutdown.Both);
                 clientSocket.Close();
             }
             catch {}
         }
 
+
         static Frame ProcessCommand(Frame frame, ref User loggedInUser, NetworkDataHelper networkDataHelper) 
         {
             byte[] responseData;
             string responseMessage = null;
+            if (loggedInUser != null && 
+                frame.Command != ProtocolConstants.CommandLogin &&
+                frame.Command != ProtocolConstants.CommandCreateUser
+                )
+            {
+                Console.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] Usuario '{loggedInUser.Username}' ejecutó comando {frame.Command}");
+            }
+
                     
             switch (frame.Command)
             {
@@ -728,7 +807,7 @@ namespace Server
                 Console.WriteLine("Users created: pau, teo, romi");
 
                 // Creación de Clases
-                // Creador para todas las clases será "pau"
+                // Creador para todas las clases es "pau"
                 var classPast = new OnlineClass("Clase 1", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
                 var classSoon = new OnlineClass("Clase 2", "Charla sobre IA", 5, DateTimeOffset.Now.AddDays(2), 120, pau);
                 var classFuture = new OnlineClass("Clase 3", "Fundamentos de computacion", 20, DateTimeOffset.Now.AddYears(1), 180, pau);
@@ -743,7 +822,7 @@ namespace Server
             }
             catch (Exception e)
             {
-                // Este catch es por si intentas agregar un usuario que ya existe, para que el servidor no se caiga.
+                // Este catch es por si se intenta agregar un usuario que ya existe, para que el servidor no se caiga.
                 Console.WriteLine($"Error during data seeding: {e.Message}");
             }
         }

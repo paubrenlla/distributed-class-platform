@@ -37,37 +37,54 @@ namespace Client
                 clientSocket.Connect(serverEndpoint);
                 Console.WriteLine("¡Conectado al servidor!");
                 _networkHelper = new NetworkDataHelper(clientSocket);
+
+                bool appIsRunning = true;
+                while (appIsRunning)
+                {
+                    AuthResult authResult = RunAuthMenu();
+
+                    if (authResult == AuthResult.LoginSuccess)
+                    {
+                        var menuStatus = RunMainMenu();
+
+                        if (menuStatus != MenuStatus.LogOut)
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        appIsRunning = false;
+                    }
+                }
             }
             catch (Exception e)
             {
-                Console.WriteLine("Error al conectar con el servidor: " + e.Message);
-                return;
+                Console.WriteLine("Conexión perdida con el servidor: " + e.Message);
+                Console.WriteLine("El servidor se ha desconectado.");
             }
-
-            bool appIsRunning = true;
-            while (appIsRunning)
+            finally
             {
-                AuthResult authResult = RunAuthMenu();
-
-                if (authResult == AuthResult.LoginSuccess)
+                Console.WriteLine("Cerrando conexión...");
+                try
                 {
-                    var menuStatus = RunMainMenu();
-
-                    if (menuStatus != MenuStatus.LogOut)
+                    if (clientSocket.Connected)
                     {
-                        break;
+                        clientSocket.Shutdown(SocketShutdown.Both);
                     }
                 }
-                else
+                catch (SocketException) { }
+                catch (ObjectDisposedException) { }
+                finally
                 {
-                    appIsRunning = false;
+                    try { clientSocket.Close(); } catch { }
                 }
-            }
 
-            Console.WriteLine("Cerrando conexión...");
-            clientSocket.Shutdown(SocketShutdown.Both);
-            clientSocket.Close();
+                Console.WriteLine("Cliente finalizado. Presione Enter para salir...");
+                Console.ReadLine();
+            }
         }
+
         
         private static AuthResult RunAuthMenu()
         {
@@ -440,11 +457,11 @@ namespace Client
             }
             catch (Exception e)
             {
-                Console.WriteLine("Error de comunicación: " + e.Message);
-                byte[] errorData = Encoding.UTF8.GetBytes("ERR|Error de red");
-                return new Frame { Command = frame.Command, Data = errorData };
+                Console.WriteLine("Conexión perdida con el servidor: " + e.Message);
+                throw;
             }
         }
+
         
         private static void SendFrame(Frame frame)
         {
