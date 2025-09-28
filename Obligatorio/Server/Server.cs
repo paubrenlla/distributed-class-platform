@@ -34,7 +34,11 @@ namespace Server
             serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             serverSocket.Bind(serverEndpoint);
             serverSocket.Listen(10);
-
+            Console.WriteLine("");
+            Console.WriteLine("");
+            Console.WriteLine("Escriba 'exit' para cerrar el servidor");
+            Console.WriteLine("");
+            Console.WriteLine("");
             Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}...");
 
             Thread acceptThread = new Thread(AcceptClients);
@@ -244,7 +248,7 @@ namespace Server
                         foreach (var onlineClass in allClasses)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(onlineClass.Id).Count;
-                            stringBuilder.Append($"{onlineClass.Id}|{onlineClass.Name}|{onlineClass.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{onlineClass.MaxCapacity}|{onlineClass.Image != null}\n");
+                            stringBuilder.Append($"{onlineClass.Id}|{onlineClass.Name}|{onlineClass.Description}|{onlineClass.Link}|{onlineClass.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{onlineClass.MaxCapacity}|{onlineClass.Image != null}\n");
                         }
                         responseMessage = stringBuilder.ToString().TrimEnd('\n');
                     }
@@ -396,7 +400,7 @@ namespace Server
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
                             string imageName = string.IsNullOrEmpty(c.Image) ? "-" : c.Image;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
+                            sb.Append($"{c.Id}|{c.Name}|{c.Description}|{c.Link}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{imageName}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
 
@@ -429,7 +433,7 @@ namespace Server
                         foreach (var c in clases)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                            sb.Append($"{c.Id}|{c.Name}|{c.Description}|{c.Link}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -460,7 +464,7 @@ namespace Server
                         foreach (var c in clases)
                         {
                             var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                            sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                            sb.Append($"{c.Id}|{c.Name}|{c.Description}|{c.Link}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                         }
                         responseMessage = sb.ToString().TrimEnd('\n');
                     }
@@ -492,7 +496,7 @@ namespace Server
                             foreach (var c in clases)
                             {
                                 var occupiedSlots = inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-                                sb.Append($"{c.Id}|{c.Name}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
+                                sb.Append($"{c.Id}|{c.Name}|{c.Description}|{c.Link}|{c.StartDate:dd/MM/yyyy HH:mm}|{occupiedSlots}|{c.MaxCapacity}|{c.Image != null}\n");
                             }
                             responseMessage = sb.ToString().TrimEnd('\n');
                         }

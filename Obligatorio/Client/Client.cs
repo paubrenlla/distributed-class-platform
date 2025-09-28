@@ -276,6 +276,7 @@ namespace Client
                     case "6": //Modificar una clase (creador)
                         Console.Write("Ingresa el ID de la clase a modificar: ");
                         string modId = Console.ReadLine();
+                        Console.WriteLine("Deje vacio para no cambiar");
                         Console.Write("Nuevo nombre: ");
                         string modName = Console.ReadLine();
                         Console.Write("Nueva descripción: ");
@@ -286,7 +287,7 @@ namespace Client
                         string modDur = Console.ReadLine();
                         Console.Write("Nueva fecha (AAAA-MM-DD HH:MM): ");
                         string modDate = Console.ReadLine();
-                        Console.Write("Ruta de nueva imagen (vacío para no cambiar): ");
+                        Console.Write("Ruta de nueva imagen: ");
                         string modImagePath = Console.ReadLine();
 
                         string modPayload = $"{modId}|{modName}|{modDesc}|{modCap}|{modDur}|{modDate}";
@@ -532,20 +533,21 @@ namespace Client
                 else
                 {
                     var classLines = data.Split('\n');
-                    Console.WriteLine("  ID | Nombre            | Fecha de Inicio     | Cupos   | Portada");
-                    Console.WriteLine("  ---|-------------------|---------------------|---------|---------");
+                    Console.WriteLine("  ID | Nombre            | Descripción        | Link                 | Fecha de Inicio     | Cupos   | Portada");
+                    Console.WriteLine("  ---|-------------------|--------------------|----------------------|---------------------|---------|---------");
                     foreach (var line in classLines)
                     {
                         if (string.IsNullOrEmpty(line)) continue;
                         var classData = line.Split('|');
-                        if (classData.Length >= 6)
+                        if (classData.Length >= 8)
                         {
-                            string cupos = $"{classData[3]}/{classData[4]}";
-                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {classData[2],-19} | {cupos,-7} | {classData[5]}");
+                            string cupos = $"{classData[5]}/{classData[6]}";
+                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {classData[2],-18} | {classData[3],-20} | {classData[4],-19} | {cupos,-7} | {classData[7]}");
                         }
                     }
                 }
             }
+
             else if (responseFrame.Command == ProtocolConstants.CommandShowHistory && status == "OK")
             {
                 if (string.IsNullOrEmpty(data) || !data.Contains("|"))
