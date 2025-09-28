@@ -37,37 +37,54 @@ namespace Client
                 clientSocket.Connect(serverEndpoint);
                 Console.WriteLine("¡Conectado al servidor!");
                 _networkHelper = new NetworkDataHelper(clientSocket);
+
+                bool appIsRunning = true;
+                while (appIsRunning)
+                {
+                    AuthResult authResult = RunAuthMenu();
+
+                    if (authResult == AuthResult.LoginSuccess)
+                    {
+                        var menuStatus = RunMainMenu();
+
+                        if (menuStatus != MenuStatus.LogOut)
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        appIsRunning = false;
+                    }
+                }
             }
             catch (Exception e)
             {
-                Console.WriteLine("Error al conectar con el servidor: " + e.Message);
-                return;
+                Console.WriteLine("Conexión perdida con el servidor: " + e.Message);
+                Console.WriteLine("El servidor se ha desconectado.");
             }
-
-            bool appIsRunning = true;
-            while (appIsRunning)
+            finally
             {
-                AuthResult authResult = RunAuthMenu();
-
-                if (authResult == AuthResult.LoginSuccess)
+                Console.WriteLine("Cerrando conexión...");
+                try
                 {
-                    var menuStatus = RunMainMenu();
-
-                    if (menuStatus != MenuStatus.LogOut)
+                    if (clientSocket.Connected)
                     {
-                        break;
+                        clientSocket.Shutdown(SocketShutdown.Both);
                     }
                 }
-                else
+                catch (SocketException) { }
+                catch (ObjectDisposedException) { }
+                finally
                 {
-                    appIsRunning = false;
+                    try { clientSocket.Close(); } catch { }
                 }
-            }
 
-            Console.WriteLine("Cerrando conexión...");
-            clientSocket.Shutdown(SocketShutdown.Both);
-            clientSocket.Close();
+                Console.WriteLine("Cliente finalizado. Presione Enter para salir...");
+                Console.ReadLine();
+            }
         }
+
         
         private static AuthResult RunAuthMenu()
         {
@@ -218,7 +235,11 @@ namespace Client
 
                         if (!string.IsNullOrEmpty(imagePath))
                         {
-                            UploadImage(imagePath, createdClassId);
+                            bool ok = UploadImage(imagePath, createdClassId);
+                            if (!ok)
+                            {
+                                Console.WriteLine("⚠️ La imagen no pudo subirse. La clase se creó igual sin portada.");
+                            }
                         }
                         requestFrame = null; // Para evitar que se vuelva a enviar al final del while
                         break;
@@ -255,6 +276,7 @@ namespace Client
                     case "6": //Modificar una clase (creador)
                         Console.Write("Ingresa el ID de la clase a modificar: ");
                         string modId = Console.ReadLine();
+                        Console.WriteLine("Deje vacio para no cambiar");
                         Console.Write("Nuevo nombre: ");
                         string modName = Console.ReadLine();
                         Console.Write("Nueva descripción: ");
@@ -265,7 +287,7 @@ namespace Client
                         string modDur = Console.ReadLine();
                         Console.Write("Nueva fecha (AAAA-MM-DD HH:MM): ");
                         string modDate = Console.ReadLine();
-                        Console.Write("Ruta de nueva imagen (vacío para no cambiar): ");
+                        Console.Write("Ruta de nueva imagen: ");
                         string modImagePath = Console.ReadLine();
 
                         string modPayload = $"{modId}|{modName}|{modDesc}|{modCap}|{modDur}|{modDate}";
@@ -281,7 +303,11 @@ namespace Client
                         ProcessSimpleResponse(modRespStr);
                         if (modRespStr.StartsWith("OK") && !string.IsNullOrEmpty(modImagePath))
                         {
-                            UploadImage(modImagePath, int.Parse(modId));
+                            bool ok = UploadImage(modImagePath, int.Parse(modId));
+                            if (!ok)
+                            {
+                                Console.WriteLine("La imagen no pudo subirse. La clase se creó igual sin portada.");
+                            }
                         }
                         requestFrame = null;
                         break;
@@ -342,79 +368,92 @@ namespace Client
                         menuStatus = MenuStatus.Escape;
                         sessionRunning = false;
                         continue;
-                    case "11": //Descargar protada
+                    case "11": // Descargar portada
                     {
-                        Console.Write("Ingresa el ID de la clase: ");
-                        string downloadId = Console.ReadLine();
-
-                        Frame downloadFrame = new Frame
+                        try
                         {
-                            Header = ProtocolConstants.Request,
-                            Command = ProtocolConstants.CommandDownloadImage,
-                            Data = Encoding.UTF8.GetBytes(downloadId)
-                        };
+                            Console.Write("Ingresa el ID de la clase: ");
+                            string downloadId = Console.ReadLine();
 
-                        _networkHelper.Send(downloadFrame);
-
-                        Frame metaFrame = _networkHelper.Receive();
-                        string metaStr = Encoding.UTF8.GetString(metaFrame.Data ?? new byte[0]);
-                        if (!metaStr.StartsWith("OK|"))
-                        {
-                            Console.WriteLine($"Error: {metaStr}");
-                            break;
-                        }
-
-                        string[] parts = metaStr.Substring(3).Split('|'); // "OK|filename|filesize"
-                        if (parts.Length < 2)
-                        {
-                            Console.WriteLine("Error en metadata recibida.");
-                            break;
-                        }
-
-                        string fileName = parts[0];
-                        long fileSize = long.Parse(parts[1]);
-
-                        string imagesPath = Path.Combine(AppContext.BaseDirectory, "ClienteImages");
-                        Directory.CreateDirectory(imagesPath);
-                        string filePath = Path.Combine(imagesPath, fileName);
-                        
-                        if (File.Exists(filePath))
-                        {
-                            File.Delete(filePath);
-                            Console.WriteLine($"Archivo existente '{fileName}' eliminado antes de descargar.");
-                        }
-
-                        long offset = 0;
-                        long partCount = ProtocolConstants.CalculateFileParts(fileSize);
-                        long currentPart = 1;
-
-                        FileStreamHelper fsh = new FileStreamHelper();
-
-                        while (offset < fileSize)
-                        {
-                            byte[] buffer;
-                            bool isLastPart = (currentPart == partCount);
-
-                            if (!isLastPart)
+                            Frame downloadFrame = new Frame
                             {
-                                buffer = _networkHelper.Receive(ProtocolConstants.MaxFilePartSize);
-                                offset += ProtocolConstants.MaxFilePartSize;
-                            }
-                            else
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandDownloadImage,
+                                Data = Encoding.UTF8.GetBytes(downloadId)
+                            };
+
+                            _networkHelper.Send(downloadFrame);
+
+                            Frame metaFrame = _networkHelper.Receive();
+                            string metaStr = Encoding.UTF8.GetString(metaFrame.Data ?? new byte[0]);
+                            if (!metaStr.StartsWith("OK|"))
                             {
-                                long lastPartSize = fileSize - offset;
-                                buffer = _networkHelper.Receive((int)lastPartSize);
-                                offset += lastPartSize;
+                                Console.WriteLine($"Error: {metaStr}");
+                                break;
                             }
 
-                            fsh.Write(filePath, buffer);
-                            currentPart++;
+                            string[] parts = metaStr.Substring(3).Split('|'); // "OK|filename|filesize"
+                            if (parts.Length < 2)
+                            {
+                                Console.WriteLine("Error en metadata recibida.");
+                                break;
+                            }
+
+                            string fileName = parts[0];
+                            if (!long.TryParse(parts[1], out long fileSize))
+                            {
+                                Console.WriteLine("Tamaño de archivo inválido.");
+                                break;
+                            }
+
+                            string imagesPath = Path.Combine(AppContext.BaseDirectory, "ClienteImages");
+                            Directory.CreateDirectory(imagesPath);
+                            string filePath = Path.Combine(imagesPath, fileName);
+
+                            if (File.Exists(filePath))
+                            {
+                                File.Delete(filePath);
+                                Console.WriteLine($"Archivo existente '{fileName}' eliminado antes de descargar.");
+                            }
+
+                            long offset = 0;
+                            long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                            long currentPart = 1;
+
+                            FileStreamHelper fsh = new FileStreamHelper();
+
+                            while (offset < fileSize)
+                            {
+                                byte[] buffer;
+                                bool isLastPart = (currentPart == partCount);
+
+                                if (!isLastPart)
+                                {
+                                    buffer = _networkHelper.Receive(ProtocolConstants.MaxFilePartSize);
+                                    offset += ProtocolConstants.MaxFilePartSize;
+                                }
+                                else
+                                {
+                                    long lastPartSize = fileSize - offset;
+                                    buffer = _networkHelper.Receive((int)lastPartSize);
+                                    offset += lastPartSize;
+                                }
+
+                                fsh.Write(filePath, buffer);
+                                currentPart++;
+                            }
+
+                            Console.WriteLine($"Imagen descargada en: {filePath}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error al descargar la portada: {ex.Message}");
                         }
 
-                        Console.WriteLine($"Imagen descargada en: {filePath}");
                         requestFrame = null;
                         break;
                     }
+
                         
 
                     default:
@@ -440,11 +479,11 @@ namespace Client
             }
             catch (Exception e)
             {
-                Console.WriteLine("Error de comunicación: " + e.Message);
-                byte[] errorData = Encoding.UTF8.GetBytes("ERR|Error de red");
-                return new Frame { Command = frame.Command, Data = errorData };
+                Console.WriteLine("Conexión perdida con el servidor: " + e.Message);
+                throw;
             }
         }
+
         
         private static void SendFrame(Frame frame)
         {
@@ -494,20 +533,21 @@ namespace Client
                 else
                 {
                     var classLines = data.Split('\n');
-                    Console.WriteLine("  ID | Nombre            | Fecha de Inicio     | Cupos   | Portada");
-                    Console.WriteLine("  ---|-------------------|---------------------|---------|---------");
+                    Console.WriteLine("  ID | Nombre            | Descripción        | Link                 | Fecha de Inicio     | Cupos   | Portada");
+                    Console.WriteLine("  ---|-------------------|--------------------|----------------------|---------------------|---------|---------");
                     foreach (var line in classLines)
                     {
                         if (string.IsNullOrEmpty(line)) continue;
                         var classData = line.Split('|');
-                        if (classData.Length >= 6)
+                        if (classData.Length >= 8)
                         {
-                            string cupos = $"{classData[3]}/{classData[4]}";
-                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {classData[2],-19} | {cupos,-7} | {classData[5]}");
+                            string cupos = $"{classData[5]}/{classData[6]}";
+                            Console.WriteLine($"  {classData[0],-2} | {classData[1],-17} | {classData[2],-18} | {classData[3],-20} | {classData[4],-19} | {cupos,-7} | {classData[7]}");
                         }
                     }
                 }
             }
+
             else if (responseFrame.Command == ProtocolConstants.CommandShowHistory && status == "OK")
             {
                 if (string.IsNullOrEmpty(data) || !data.Contains("|"))
@@ -536,72 +576,92 @@ namespace Client
             }
         }
         
-        private static void UploadImage(string imagePath, int classId)
+        private static bool UploadImage(string imagePath, int classId)
         {
-            if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
+            try
             {
-                Console.WriteLine("No se encontró el archivo de imagen.");
-                return;
-            }
-
-            FileInfo fi = new FileInfo(imagePath);
-            string fileName = fi.Name;
-            byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
-            int fileNameLength = fileNameBytes.Length;
-            long fileSize = fi.Length;
-
-            FileStreamHelper fsh = new FileStreamHelper();
-            Frame enviarImagen = new Frame
-            {
-                Header = ProtocolConstants.Request,
-                Command = ProtocolConstants.CommandUploadImage,
-                Data = Encoding.UTF8.GetBytes("")
-            };
-            SendFrame(enviarImagen);
-
-            _networkHelper.Send(BitConverter.GetBytes(classId));
-            _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
-            _networkHelper.Send(fileNameBytes);
-            _networkHelper.Send(BitConverter.GetBytes(fileSize));
-            
-            Frame metaResponse = _networkHelper.Receive();
-            string metaRespStr = Encoding.UTF8.GetString(metaResponse.Data ?? new byte[0]);
-            ProcessSimpleResponse(metaRespStr);
-
-            if (!metaRespStr.StartsWith("OK"))
-            {
-                return;
-            }
-
-            long offset = 0;
-            long partCount = ProtocolConstants.CalculateFileParts(fileSize);
-            long currentPart = 1;
-
-            while (offset < fileSize)
-            {
-                byte[] buffer;
-                bool isLastPart = (currentPart == partCount);
-
-                if (!isLastPart)
+                if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
                 {
-                    buffer = fsh.Read(imagePath, offset, ProtocolConstants.MaxFilePartSize);
-                    offset += ProtocolConstants.MaxFilePartSize;
-                }
-                else
-                {
-                    long lastPartSize = fileSize - offset;
-                    buffer = fsh.Read(imagePath, offset, (int)lastPartSize);
-                    offset += lastPartSize;
+                    Console.WriteLine("No se encontró el archivo de imagen.");
+                    return false;
                 }
 
-                _networkHelper.Send(buffer);
-                currentPart++;
-            }
+                FileInfo fi = new FileInfo(imagePath);
+                string fileName = fi.Name;
+                byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
+                int fileNameLength = fileNameBytes.Length;
+                long fileSize = fi.Length;
 
-            Frame imageResponse = _networkHelper.Receive();
-            string imageRespStr = Encoding.UTF8.GetString(imageResponse.Data ?? new byte[0]);
-            ProcessSimpleResponse(imageRespStr);
+                FileStreamHelper fsh = new FileStreamHelper();
+                Frame enviarImagen = new Frame
+                {
+                    Header = ProtocolConstants.Request,
+                    Command = ProtocolConstants.CommandUploadImage,
+                    Data = Array.Empty<byte>()
+                };
+                SendFrame(enviarImagen);
+
+                _networkHelper.Send(BitConverter.GetBytes(classId));
+                _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
+                _networkHelper.Send(fileNameBytes);
+                _networkHelper.Send(BitConverter.GetBytes(fileSize));
+
+                Frame metaResponse = _networkHelper.Receive();
+                string metaRespStr = Encoding.UTF8.GetString(metaResponse.Data ?? Array.Empty<byte>());
+                ProcessSimpleResponse(metaRespStr);
+
+                if (!metaRespStr.StartsWith("OK"))
+                {
+                    Console.WriteLine("El servidor rechazó la subida de la imagen.");
+                    return false;
+                }
+
+                long offset = 0;
+                long partCount = ProtocolConstants.CalculateFileParts(fileSize);
+                long currentPart = 1;
+
+                while (offset < fileSize)
+                {
+                    byte[] buffer;
+                    bool isLastPart = (currentPart == partCount);
+
+                    if (!isLastPart)
+                    {
+                        buffer = fsh.Read(imagePath, offset, ProtocolConstants.MaxFilePartSize);
+                        offset += ProtocolConstants.MaxFilePartSize;
+                    }
+                    else
+                    {
+                        long lastPartSize = fileSize - offset;
+                        buffer = fsh.Read(imagePath, offset, (int)lastPartSize);
+                        offset += lastPartSize;
+                    }
+
+                    _networkHelper.Send(buffer);
+                    Console.WriteLine($"Enviando segmento {currentPart}/{partCount}...");
+                    currentPart++;
+                }
+
+                Frame imageResponse = _networkHelper.Receive();
+                string imageRespStr = Encoding.UTF8.GetString(imageResponse.Data ?? Array.Empty<byte>());
+                ProcessSimpleResponse(imageRespStr);
+
+                if (!imageRespStr.StartsWith("OK"))
+                {
+                    Console.WriteLine("El servidor no confirmó la imagen.");
+                    return false;
+                }
+
+                Console.WriteLine("Imagen subida correctamente.");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error al enviar la imagen: " + e.Message);
+                return false;
+            }
         }
+
 
         
     }

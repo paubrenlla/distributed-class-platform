@@ -6,7 +6,7 @@ using System.Text;
 
 public class Frame
 {
-    public string Header { get; set; } 
+    public string Header { get; set; } // es R (Reques) o S (Response)
     public short Command { get; set; }
     public byte[] Data { get; set; }
 }
@@ -30,7 +30,7 @@ public class NetworkDataHelper
         byte[] dataLengthBytes = BitConverter.GetBytes(dataLength);
 
         // Concatenar en un solo paquete
-        // [HEADER (3)] + [CMD (2)] + [LARGO (4)] + [DATOS (...)]
+        // [HEADER (1)] + [CMD (2)] + [LARGO (4)] + [DATOS (...)]
         int totalPacketSize = ProtocolConstants.FixedHeaderSize + dataLength;
         byte[] packet = new byte[totalPacketSize];
         

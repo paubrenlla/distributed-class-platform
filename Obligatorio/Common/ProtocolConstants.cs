@@ -3,11 +3,11 @@ namespace Common;
 public static class ProtocolConstants
 {
     // HEADER (3 bytes)
-    public const string Request = "REQ";
-    public const string Response = "RES";
+    public const string Request = "R";
+    public const string Response = "S";
 
     // Largo Fijo de Campos
-    public const int HeaderLength = 3;
+    public const int HeaderLength = 1;
     public const int CommandLength = 2;
     public const int DataLengthSize = 4;
     public const int FixedHeaderSize = HeaderLength + CommandLength + DataLengthSize;
