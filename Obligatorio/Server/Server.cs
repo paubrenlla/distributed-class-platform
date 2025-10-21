@@ -568,6 +568,25 @@ namespace Server
             
                             if (inscriptionRepo.GetActiveClassByClassId(classId).Any())
                                 throw new Exception("No se puede eliminar una clase con usuarios inscriptos.");
+                            
+                            if (!string.IsNullOrEmpty(classToDelete.Image))
+                            {
+                                string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                                string imagePath = Path.Combine(imagesPath, classToDelete.Image);
+
+                                if (File.Exists(imagePath))
+                                {
+                                    try
+                                    {
+                                        File.Delete(imagePath);
+                                        Console.WriteLine($"Imagen '{classToDelete.Image}' eliminada del servidor.");
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"⚠️ No se pudo eliminar la imagen '{classToDelete.Image}': {ex.Message}");
+                                    }
+                                }
+                            }
 
                             classToDelete.Eliminar(); 
                             classRepo.Delete(classId);
