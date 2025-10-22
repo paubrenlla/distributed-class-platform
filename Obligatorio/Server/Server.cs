@@ -46,7 +46,10 @@ namespace Server
             {
                 try
                 {
+                    Console.WriteLine("Esperando nuevo cliente...");
                     Socket clientSocket = await serverSocket.AcceptAsync();
+                    Console.WriteLine($"Nuevo socket aceptado: {clientSocket.RemoteEndPoint}");
+
                     lock (clientListLock)
                     {
                         connectedClients.Add(clientSocket);
@@ -54,15 +57,25 @@ namespace Server
 
                     Console.WriteLine($"Cliente conectado: {clientSocket.RemoteEndPoint}");
 
-                    _ = HandleClient(clientSocket);
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await HandleClient(clientSocket);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Excepción en cliente {clientSocket.RemoteEndPoint}] {ex.Message}");
+                        }
+                    });
                 }
-                catch (SocketException ex)
+                catch (Exception ex)
                 {
-                    if (isRunning)
-                        Console.WriteLine($"Error en Accept: {ex.Message}");
+                    Console.WriteLine($"[Error en AcceptClients] {ex.Message}");
                 }
             }
         }
+
 
 
         static async Task HandleClient(Socket clientSocket)
