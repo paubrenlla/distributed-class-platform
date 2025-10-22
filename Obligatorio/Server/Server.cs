@@ -14,14 +14,14 @@ namespace Server
         static UserRepository userRepo = new UserRepository();
         static readonly OnlineClassRepository classRepo = new OnlineClassRepository();
         static readonly InscriptionRepository inscriptionRepo = new InscriptionRepository();
-        public static readonly object GlobalLock = new object();
+        public static readonly SemaphoreSlim ImageSemaphore = new SemaphoreSlim(1, 1); //esto es para hacer mutua exlucion con await en subir imagenes y eliminar clases
         static bool isRunning = true;
         static Socket serverSocket;
         static readonly List<Socket> connectedClients = new List<Socket>();
         static readonly object clientListLock = new object();
         static int maxClients = 3;
 
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             SeedData();
             Console.WriteLine("Server starting with preloaded data...");
@@ -34,85 +34,51 @@ namespace Server
             serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             serverSocket.Bind(serverEndpoint);
             serverSocket.Listen(10);
-            Console.WriteLine("");
-            Console.WriteLine("");
-            Console.WriteLine("Escriba 'exit' para cerrar el servidor");
-            Console.WriteLine("");
-            Console.WriteLine("");
-            Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}...");
+            Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}");
+            Console.WriteLine("Presiona Ctrl+C para cerrar (en Docker, se detiene con docker stop)");
 
-            Thread acceptThread = new Thread(AcceptClients);
-            acceptThread.Start();
-
-            while (isRunning)
-            {
-                string command = Console.ReadLine();
-                if (command?.Equals("exit", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    Console.WriteLine("Cerrando servidor de forma controlada...");
-                    isRunning = false;
-
-                    serverSocket.Close();
-
-                    lock (clientListLock)
-                    {
-                        foreach (var client in connectedClients)
-                        {
-                            try { client.Shutdown(SocketShutdown.Both); } catch { }
-                            client.Close();
-                        }
-                        connectedClients.Clear();
-                    }
-
-                    break;
-                }
-            }
-
-            Console.WriteLine("Servidor cerrado.");
+            await AcceptClients();
         }
 
-        static void AcceptClients()
+        static async Task AcceptClients()
         {
-            try
+            while (isRunning)
             {
-                while (isRunning)
+                try
                 {
-                    Socket clientSocket = serverSocket.Accept();
+                    Console.WriteLine("Esperando nuevo cliente...");
+                    Socket clientSocket = await serverSocket.AcceptAsync();
+                    Console.WriteLine($"Nuevo socket aceptado: {clientSocket.RemoteEndPoint}");
 
                     lock (clientListLock)
                     {
-                        if (connectedClients.Count >= maxClients)
-                        {
-                            Console.WriteLine("Rechazando cliente: límite máximo alcanzado.");
-                            clientSocket.Close();
-                            continue;
-                        }
-
                         connectedClients.Add(clientSocket);
                     }
 
-                    Console.WriteLine($"Cliente conectado ({connectedClients.Count}/{maxClients})");
+                    Console.WriteLine($"Cliente conectado: {clientSocket.RemoteEndPoint}");
 
-                    Thread t = new Thread(() =>
+                    _ = Task.Run(async () =>
                     {
-                        HandleClient(clientSocket);
-                        lock (clientListLock)
-                            connectedClients.Remove(clientSocket);
+                        try
+                        {
+                            await HandleClient(clientSocket);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Excepción en cliente {clientSocket.RemoteEndPoint}] {ex.Message}");
+                        }
                     });
-                    t.Start();
                 }
-            }
-            catch (SocketException)
-            {
-                if (isRunning)
-                    Console.WriteLine("Error inesperado en Accept().");
-                else
-                    Console.WriteLine("Accept() terminó porque el servidor se cerró.");
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Error en AcceptClients] {ex.Message}");
+                }
             }
         }
 
 
-        static void HandleClient(Socket clientSocket)
+
+        static async Task HandleClient(Socket clientSocket)
         {
             string clientId;
             try
@@ -128,19 +94,18 @@ namespace Server
 
             bool clientActive = true;
             NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
-
             User loggedInUser = null;
 
             while (clientActive)
             {
                 try
                 {
-                    Frame receivedFrame = networkDataHelper.Receive();
+                    Frame receivedFrame = await networkDataHelper.Receive();
                     Console.WriteLine($"Client {clientId} sent command: {receivedFrame.Command}");
 
-                    Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser, networkDataHelper);
+                    (var responseFrame, loggedInUser) = await ProcessCommand(receivedFrame, loggedInUser, networkDataHelper); //como no te deja hacer ref para el logged user tuvimos que cambiarlo a una tupla
                     if (responseFrame != null)
-                        networkDataHelper.Send(responseFrame);
+                        await networkDataHelper.Send(responseFrame);
                 }
                 catch (SocketException)
                 {
@@ -163,11 +128,15 @@ namespace Server
                 clientSocket.Shutdown(SocketShutdown.Both);
                 clientSocket.Close();
             }
-            catch {}
+            catch { }
         }
 
 
-        static Frame ProcessCommand(Frame frame, ref User loggedInUser, NetworkDataHelper networkDataHelper) 
+
+        static async Task<(Frame Frame, User UpdatedUser)> ProcessCommand(
+            Frame frame,
+            User loggedInUser,
+            NetworkDataHelper networkDataHelper)
         {
             byte[] responseData;
             string responseMessage = null;
@@ -296,8 +265,6 @@ namespace Server
                     try
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
-                        lock (Program.GlobalLock)
-                        {
                             var classToJoin = classRepo.GetById(classId);
                             if (classToJoin == null) throw new Exception("La clase no existe.");
 
@@ -312,7 +279,7 @@ namespace Server
                             inscriptionRepo.Add(newInscription);
 
                             responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";
-                        }
+                        
                     }
                     catch (Exception ex)
                     {
@@ -330,8 +297,7 @@ namespace Server
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
         
-                        lock (Program.GlobalLock)
-                        {
+                        
                             var inscription = inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId);
                             if (inscription == null) 
                                 throw new Exception("No estás inscrito en esta clase.");
@@ -343,7 +309,7 @@ namespace Server
                             inscription.Cancel();
             
                             responseMessage = $"OK|Tu inscripción a la clase '{inscription.Class.Name}' ha sido cancelada.";
-                        }
+                        
                     }
                     catch (Exception ex)
                     {
@@ -521,8 +487,7 @@ namespace Server
 
                         int classId = int.Parse(parts[0]);
                  
-                        lock (Program.GlobalLock) 
-                        {
+                        
                             var classToModify = classRepo.GetById(classId);
                             if (classToModify == null) throw new Exception("La clase no existe.");
     
@@ -540,7 +505,7 @@ namespace Server
                             classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions);
 
                             responseMessage = $"OK|Clase '{newName}' modificada con éxito.";
-                        }
+                        
                     }
                     catch (Exception ex)
                     {
@@ -558,7 +523,8 @@ namespace Server
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
         
-                        lock (Program.GlobalLock)
+                        await Program.ImageSemaphore.WaitAsync();
+                        try
                         {
                             var classToDelete = classRepo.GetById(classId);
                             if (classToDelete == null) throw new Exception("La clase no existe.");
@@ -581,7 +547,7 @@ namespace Server
                                         File.Delete(imagePath);
                                         Console.WriteLine($"Imagen '{classToDelete.Image}' eliminada del servidor.");
                                     }
-                                    catch (Exception ex)
+                                    catch (Exception ex) 
                                     {
                                         Console.WriteLine($"⚠️ No se pudo eliminar la imagen '{classToDelete.Image}': {ex.Message}");
                                     }
@@ -592,6 +558,10 @@ namespace Server
                             classRepo.Delete(classId);
 
                             responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
+                        }
+                        finally
+                        {
+                            Program.ImageSemaphore.Release();
                         }
                     }
                     catch (Exception ex)
@@ -608,9 +578,10 @@ namespace Server
 
                     try
                     {
-                        lock (Program.GlobalLock)
+                        await Program.ImageSemaphore.WaitAsync();
+                        try
                         {
-                            byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
+                            byte[] classIdImageBytes = await networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
                             int classIdImage = BitConverter.ToInt32(classIdImageBytes);
                             OnlineClass classToAddImage = classRepo.GetById(classIdImage);
                             if (classToAddImage == null) throw new Exception("La clase no existe.");
@@ -618,13 +589,14 @@ namespace Server
                             if (classToAddImage.Creator.Id != loggedInUser.Id)
                                 throw new Exception("No tienes permiso para modificar esta clase.");
 
-                            byte[] fileNameLengthBuffer = networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
+                            byte[] fileNameLengthBuffer =
+                                await networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
                             int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
 
-                            byte[] fileNameBytes = networkDataHelper.Receive(fileNameLength);
+                            byte[] fileNameBytes = await networkDataHelper.Receive(fileNameLength);
                             string fileName = Encoding.UTF8.GetString(fileNameBytes);
 
-                            byte[] fileSizeBuffer = networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
+                            byte[] fileSizeBuffer = await networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
                             long fileSize = BitConverter.ToInt64(fileSizeBuffer);
 
                             string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
@@ -639,16 +611,20 @@ namespace Server
                             {
                                 responseMessage =
                                     $"ERR|El nombre de imagen '{fileName}' ya está siendo usado por la clase {otherClassWithSameImage.Id}.";
-                                return new Frame
-                                {
-                                    Header = ProtocolConstants.Response,
-                                    Command = ProtocolConstants.CommandUploadImage,
-                                    Data = Encoding.UTF8.GetBytes(responseMessage)
-                                };
+                                return (
+                                    new Frame
+                                    {
+                                        Header = ProtocolConstants.Response,
+                                        Command = ProtocolConstants.CommandUploadImage,
+                                        Data = Encoding.UTF8.GetBytes(responseMessage)
+                                    },
+                                    loggedInUser
+                                );
+
                             }
 
                             responseMessage = "OK|Listo para recibir imagen";
-                            networkDataHelper.Send(new Frame
+                            await networkDataHelper.Send(new Frame
                             {
                                 Header = ProtocolConstants.Response,
                                 Command = ProtocolConstants.CommandUploadImage,
@@ -670,19 +646,20 @@ namespace Server
 
                                 if (!isLastPart)
                                 {
-                                    Console.WriteLine($"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
-                                    buffer = networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
+                                    Console.WriteLine(
+                                        $"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
+                                    buffer = await networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
                                     offset += ProtocolConstants.MaxFilePartSize;
                                 }
                                 else
                                 {
                                     long lastPartSize = fileSize - offset;
                                     Console.WriteLine($"Receiving segment #{currentPart} of size {lastPartSize}");
-                                    buffer = networkDataHelper.Receive((int)lastPartSize);
+                                    buffer = await networkDataHelper.Receive((int)lastPartSize);
                                     offset += lastPartSize;
                                 }
 
-                                fsh.Write(filePath, buffer);
+                                await fsh.Write(filePath, buffer);
                                 currentPart++;
                             }
 
@@ -699,7 +676,12 @@ namespace Server
                             Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
                             classToAddImage.Image = fileName;
 
-                            responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
+                            responseMessage =
+                                $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
+                        }
+                        finally
+                        {
+                            Program.ImageSemaphore.Release();
                         }
                     }
                     catch (Exception ex)
@@ -751,7 +733,7 @@ namespace Server
                         Data = responseData
                     };
                     
-                    networkDataHelper.Send(metaFrame);
+                    await networkDataHelper.Send(metaFrame);
                     
                     FileStreamHelper fsh = new FileStreamHelper();
                     long offset = 0;
@@ -765,17 +747,17 @@ namespace Server
 
                         if (!isLastPart)
                         {
-                            buffer = fsh.Read(filePath, offset, ProtocolConstants.MaxFilePartSize);
+                            buffer = await fsh.Read(filePath, offset, ProtocolConstants.MaxFilePartSize);
                             offset += ProtocolConstants.MaxFilePartSize;
                         }
                         else
                         {
                             long lastPartSize = fileSize - offset;
-                            buffer = fsh.Read(filePath, offset, (int)lastPartSize);
+                            buffer = await fsh.Read(filePath, offset, (int)lastPartSize);
                             offset += lastPartSize;
                         }
 
-                        networkDataHelper.Send(buffer);
+                        await networkDataHelper.Send(buffer);
                         currentPart++;
                     }
                     
@@ -786,8 +768,7 @@ namespace Server
                     {
                         responseMessage = $"ERR|{ex.Message}";
                     }
-                    return null;
-
+                    return (null, loggedInUser);
 
                 case ProtocolConstants.CommandLogout:
                     if (loggedInUser == null)
@@ -807,12 +788,12 @@ namespace Server
             }
             
             responseData = Encoding.UTF8.GetBytes(responseMessage);
-            return new Frame
+            return (new Frame
             {
                 Header = ProtocolConstants.Response,
                 Command = frame.Command,
                 Data = responseData
-            };
+            }, loggedInUser);
         }
         private static void SeedData()
         {

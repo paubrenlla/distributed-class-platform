@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Domain;
 
 namespace Repository
@@ -8,31 +9,47 @@ namespace Repository
     public class OnlineClassRepository
     {
         private readonly List<OnlineClass> _clases = new List<OnlineClass>();
-        private readonly object _lock = new object();
+        private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
 
         public OnlineClass Add(OnlineClass clase)
         {
             if (clase == null) throw new ArgumentNullException(nameof(clase));
-            lock (_lock)
+
+            _semaphore.Wait();
+            try
             {
                 _clases.Add(clase);
                 return clase;
+            }
+            finally
+            {
+                _semaphore.Release();
             }
         }
 
         public OnlineClass GetById(int id)
         {
-            lock (_lock)
+            _semaphore.Wait();
+            try
             {
                 return _clases.FirstOrDefault(c => c.Id == id);
+            }
+            finally
+            {
+                _semaphore.Release();
             }
         }
 
         public List<OnlineClass> GetAll()
         {
-            lock (_lock)
+            _semaphore.Wait();
+            try
             {
                 return new List<OnlineClass>(_clases);
+            }
+            finally
+            {
+                _semaphore.Release();
             }
         }
 
@@ -47,19 +64,24 @@ namespace Repository
         public void ModifyClass(int classId, string newName, string newDesc, string newCapacity,
             string newDuration, string newDate, int inscripcionesActuales)
         {
-            lock (_lock)
+            _semaphore.Wait();
+            try
             {
                 var clase = _clases.FirstOrDefault(c => c.Id == classId);
                 if (clase == null) throw new InvalidOperationException("Clase no encontrada");
 
                 clase.Modificar(newName, newDesc, newCapacity, newDate, newDuration, inscripcionesActuales);
             }
+            finally
+            {
+                _semaphore.Release();
+            }
         }
-
 
         public void Delete(int id)
         {
-            lock (_lock)
+            _semaphore.Wait();
+            try
             {
                 var clase = GetById(id);
                 if (clase == null)
@@ -67,28 +89,41 @@ namespace Repository
 
                 _clases.Remove(clase);
             }
+            finally
+            {
+                _semaphore.Release();
+            }
         }
 
         public void EnsureImageNameIsUnique(int classId, string fileName)
         {
-            lock (_lock)
+            _semaphore.Wait();
+            try
             {
                 var conflict = _clases.Any(c => c.Id != classId && c.Image == fileName);
                 if (conflict)
                     throw new InvalidOperationException($"El nombre de imagen '{fileName}' ya está siendo usado");
             }
+            finally
+            {
+                _semaphore.Release();
+            }
         }
 
         public void UpdateImage(int classId, string newFileName)
         {
-            lock (_lock)
+            _semaphore.Wait();
+            try
             {
                 var clase = _clases.FirstOrDefault(c => c.Id == classId);
                 if (clase == null) throw new InvalidOperationException("Clase no encontrada");
 
                 clase.Image = newFileName;
             }
+            finally
+            {
+                _semaphore.Release();
+            }
         }
-
     }
 }
