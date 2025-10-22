@@ -20,7 +20,7 @@ public class NetworkDataHelper
         _socket = socket;
     }
     
-    public void Send(Frame frame)
+    public async Task Send(Frame frame)
     {
         byte[] headerBytes = Encoding.ASCII.GetBytes(frame.Header);
         
@@ -44,12 +44,12 @@ public class NetworkDataHelper
         }
         
         // Envia el paquete completo usando el método Send original
-        Send(packet);
+        await Send(packet);
     }
     
-    public Frame Receive()
+    public async Task<Frame> Receive()
     {
-        byte[] fixedHeader = Receive(ProtocolConstants.FixedHeaderSize);
+        byte[] fixedHeader = await Receive(ProtocolConstants.FixedHeaderSize);
 
         string header = Encoding.ASCII.GetString(fixedHeader, 0, ProtocolConstants.HeaderLength);
         short command = BitConverter.ToInt16(fixedHeader, ProtocolConstants.HeaderLength);
@@ -58,13 +58,13 @@ public class NetworkDataHelper
         byte[] data = null;
         if (dataLength > 0)
         {
-            data = Receive(dataLength);
+            data = await Receive(dataLength);
         }
 
         return new Frame { Header = header, Command = command, Data = data };
     }
 
-    public void Send(byte[] buffer)
+    public async Task Send(byte[] buffer)
     {
         int length = buffer.Length;
         int offset = 0;
@@ -76,7 +76,7 @@ public class NetworkDataHelper
         }
     }
 
-    public byte[] Receive(int length)
+    public async Task<byte[]> Receive(int length)
     {
         byte[] buffer = new byte[length];
         int offset = 0;
@@ -87,16 +87,6 @@ public class NetworkDataHelper
             offset += received;
         }
         return buffer;
-    }
-    
-    public void SendBytes(byte[] buffer)
-    {
-        Send(buffer);
-    }
-
-    public byte[] ReceiveBytes(int length)
-    {
-        return Receive(length);
     }
 
 }
