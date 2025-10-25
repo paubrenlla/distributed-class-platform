@@ -167,6 +167,7 @@ namespace Client
                 Console.WriteLine("9. Cerrar sesion");
                 Console.WriteLine("10. Salir de la Aplicación");
                 Console.WriteLine("11. Descargar portada");
+                Console.WriteLine("12. Generar reporte del dia");
                 Console.Write("Seleccione una opción: ");
 
                 string input = Console.ReadLine();
@@ -453,7 +454,70 @@ namespace Client
                         break;
                     }
 
-                        
+                    case "12": // Generar Reporte del Día
+                        Console.WriteLine("Generando reporte... Presione [x] para cancelar.");
+
+                        var reportCts = new CancellationTokenSource();
+                        var reportRequestFrame = new Frame
+                        {
+                            Header = ProtocolConstants.Request,
+                            Command = ProtocolConstants.CommandGenerateReport,
+                            Data = null
+                        };
+
+                        Task<Frame> reportTask = SendAndReceiveFrame(reportRequestFrame);
+
+                        Task cancelListenerTask = Task.Run(() =>
+                        {
+                            while (!reportCts.Token.IsCancellationRequested)
+                            {
+                                if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.X)
+                                {
+                                    break;
+                                }
+                                Task.Delay(100).Wait(); // Espera corta para no consumir CPU
+                            }
+                        }, reportCts.Token);
+
+                        try
+                        {
+                            Task completedTask = await Task.WhenAny(reportTask, cancelListenerTask);
+
+                            if (completedTask == reportTask) // El reporte terminó (con éxito o error) ANTES de presionar X
+                            {
+                                Frame responseFrame = await reportTask;
+                                ProcessFullResponse(responseFrame);
+                            }
+                            else // se presionó X
+                            {
+                                Console.WriteLine("Enviando señal de cancelación al servidor...");
+                                
+                                var cancelFrame = new Frame
+                                {
+                                    Header = ProtocolConstants.Request,
+                                    Command = ProtocolConstants.CommandCancelReport,
+                                    Data = null
+                                };
+                                
+                                await SendFrame(cancelFrame);
+
+                                Console.WriteLine("Esperando confirmación de cancelación del servidor...");
+                                Frame cancelResponse = await reportTask; 
+                                ProcessFullResponse(cancelResponse);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error durante el reporte o la cancelación: {ex.Message}");
+                        }
+                        finally
+                        {
+                            reportCts.Cancel();
+                            reportCts.Dispose();
+                        }
+
+                        requestFrame = null;
+                        break;
 
                     default:
                         Console.WriteLine("Opción no válida. Intente de nuevo.");
@@ -474,7 +538,7 @@ namespace Client
             try
             {
                 await _networkHelper.Send(frame);
-                return await _networkHelper.Receive();
+                return await _networkHelper.Receive(); 
             }
             catch (Exception e)
             {
@@ -482,7 +546,6 @@ namespace Client
                 throw;
             }
         }
-
         
         private static async Task SendFrame(Frame frame)
         {

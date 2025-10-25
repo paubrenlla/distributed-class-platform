@@ -70,7 +70,7 @@ public class NetworkDataHelper
         int offset = 0;
         while (offset < length)
         {
-            int sent = _socket.Send(buffer, offset, length - offset, SocketFlags.None);
+            int sent = await _socket.SendAsync(new ArraySegment<byte>(buffer, offset, length - offset), SocketFlags.None);
             if (sent == 0) throw new SocketException();
             offset += sent;
         }
@@ -82,7 +82,7 @@ public class NetworkDataHelper
         int offset = 0;
         while (offset < length)
         {
-            int received = _socket.Receive(buffer, offset, length - offset, SocketFlags.None);
+            int received = await _socket.ReceiveAsync(new ArraySegment<byte>(buffer, offset, length - offset), SocketFlags.None);
             if (received == 0) throw new SocketException();
             offset += received;
         }
