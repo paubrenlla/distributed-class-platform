@@ -167,6 +167,7 @@ namespace Client
                 Console.WriteLine("9. Cerrar sesion");
                 Console.WriteLine("10. Salir de la Aplicación");
                 Console.WriteLine("11. Descargar portada");
+                Console.WriteLine("12. Generar reporte del dia");
                 Console.Write("Seleccione una opción: ");
 
                 string input = Console.ReadLine();
@@ -452,8 +453,27 @@ namespace Client
                         requestFrame = null;
                         break;
                     }
+                    case "12": // Generar Reporte del Día
+                        Console.WriteLine("Generando reporte... por favor espere.");
+                
+                        requestFrame = new Frame
+                        {
+                            Header = ProtocolConstants.Request,
+                            Command = ProtocolConstants.CommandGenerateReport,
+                            Data = null
+                        };
+                        try
+                        {
+                            Frame responseFrame = await SendAndReceiveFrame(requestFrame); // <-- LLAMADA SIN TOKEN
+                            ProcessFullResponse(responseFrame);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error al generar el reporte: {ex.Message}");
+                        }
 
-                        
+                        requestFrame = null;
+                        break;
 
                     default:
                         Console.WriteLine("Opción no válida. Intente de nuevo.");
@@ -474,7 +494,7 @@ namespace Client
             try
             {
                 await _networkHelper.Send(frame);
-                return await _networkHelper.Receive();
+                return await _networkHelper.Receive(); 
             }
             catch (Exception e)
             {
@@ -482,7 +502,6 @@ namespace Client
                 throw;
             }
         }
-
         
         private static async Task SendFrame(Frame frame)
         {

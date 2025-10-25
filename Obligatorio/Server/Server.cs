@@ -95,7 +95,7 @@ namespace Server
             bool clientActive = true;
             NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
             User loggedInUser = null;
-
+            
             while (clientActive)
             {
                 try
@@ -103,7 +103,9 @@ namespace Server
                     Frame receivedFrame = await networkDataHelper.Receive();
                     Console.WriteLine($"Client {clientId} sent command: {receivedFrame.Command}");
 
-                    (var responseFrame, loggedInUser) = await ProcessCommand(receivedFrame, loggedInUser, networkDataHelper); //como no te deja hacer ref para el logged user tuvimos que cambiarlo a una tupla
+                    (var responseFrame, loggedInUser) = await ProcessCommand(
+                        receivedFrame, loggedInUser, networkDataHelper);
+            
                     if (responseFrame != null)
                         await networkDataHelper.Send(responseFrame);
                 }
@@ -136,7 +138,8 @@ namespace Server
         static async Task<(Frame Frame, User UpdatedUser)> ProcessCommand(
             Frame frame,
             User loggedInUser,
-            NetworkDataHelper networkDataHelper)
+            NetworkDataHelper networkDataHelper
+        )
         {
             byte[] responseData;
             string responseMessage = null;
@@ -256,6 +259,7 @@ namespace Server
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
+                
                 case ProtocolConstants.CommandSubscribeToClass:
                     if (loggedInUser == null)
                     {
@@ -374,7 +378,6 @@ namespace Server
                     break;
                 }
 
-
                 case ProtocolConstants.SearchClassesByNamwe:
                 {
                     if (loggedInUser == null)
@@ -473,6 +476,7 @@ namespace Server
                     }
                     break;
                 }
+                
                 case ProtocolConstants.CommandModifyClass:
                     if (loggedInUser == null)
                     {
@@ -512,7 +516,7 @@ namespace Server
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
-
+                
                 case ProtocolConstants.CommandDeleteClass:
                     if (loggedInUser == null)
                     {
@@ -569,6 +573,7 @@ namespace Server
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
+                
                 case ProtocolConstants.CommandUploadImage:
                     if (loggedInUser == null)
                     {
@@ -782,12 +787,34 @@ namespace Server
                     }
                     break;
                 
+                case ProtocolConstants.CommandGenerateReport:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión para generar un reporte.";
+                        break;
+                    }
+                    try
+                    {
+                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Iniciando generación de reporte...");
+                
+                        responseMessage = await GenerateReportAsync();
+                
+                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Reporte generado con éxito.");
+                    }
+                    catch (Exception ex)
+                    {
+                        responseMessage = $"ERR|Ocurrió un error al generar el reporte: {ex.Message}";
+                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Error en reporte: {ex.Message}");
+                    }
+                    break;
+                
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
                     break;
             }
             
             responseData = Encoding.UTF8.GetBytes(responseMessage);
+            
             return (new Frame
             {
                 Header = ProtocolConstants.Response,
@@ -795,13 +822,84 @@ namespace Server
                 Data = responseData
             }, loggedInUser);
         }
+        
+        private static async Task<string> GenerateReportAsync()        
+        {
+            Console.WriteLine("Iniciando generación de reporte...");
+            string responseMessage = null;
+
+            List<OnlineClass> todayClasses = classRepo.GetAll().Where(c => c.StartDate.Date == DateTimeOffset.Now.Date).ToList();
+
+            if (todayClasses.Count == 0)
+            {
+                return "OK|No hay clases programadas para el día de hoy.";
+            }
+            int totalClasses = todayClasses.Count;
+            double avgDuration = todayClasses.Average(c => c.Duration);
+        
+            int totalInscriptions = 0;
+            foreach (var c in todayClasses)
+            {
+                totalInscriptions += inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
+            }
+            double avgInscriptions = (totalClasses > 0) ? (double)totalInscriptions / totalClasses : 0;
+
+            var classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();
+            int totalImages = classesWithImages.Count;
+            long totalSize = 0;
+            double avgSize = 0;
+
+            if (totalImages > 0)
+            {
+                var sizeTasks = new List<Task<long>>();
+                string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+
+                foreach (var c in classesWithImages)
+                {
+                    sizeTasks.Add(GetFileSizeAsync(Path.Combine(imagesPath, c.Image)));
+                }
+
+                long[] sizes = await Task.WhenAll(sizeTasks);
+
+                totalSize = sizes.Sum();
+                avgSize = (double)totalSize / totalImages;
+            }
+
+            var report = new StringBuilder();
+            
+            report.Append("OK|--- Reporte de Clases del Día ---\n");
+            report.Append($"Total de Clases: {totalClasses}\n");
+            report.Append($"Duración Promedio: {avgDuration:F2} min\n");
+            report.Append($"Total de Inscriptos: {totalInscriptions}\n");
+            report.Append($"Promedio de Inscriptos: {avgInscriptions:F2}\n");
+            report.Append($"Clases con Portada: {totalImages}\n");
+            report.Append($"Tamaño Total de Portadas: {totalSize} bytes\n");
+            report.Append($"Tamaño Promedio de Portadas: {avgSize:F2} bytes");
+            
+            responseMessage = report.ToString();
+        
+            Console.WriteLine("Reporte generado con éxito.");
+            
+            return responseMessage;
+        }
+        
+        private static async Task<long> GetFileSizeAsync(string filePath)
+        {
+            await Task.Delay(3000); // TODO just for testing purpose
+            if (!File.Exists(filePath))
+            {
+                return 0;
+            }
+            return new FileInfo(filePath).Length;
+        }
+        
         private static void SeedData()
         {
             try
             {
                 Console.WriteLine("Seeding initial data...");
 
-                // Creación de Usuarios
+                // --- 1. Creación de Usuarios ---
                 var pau = new User("pau", "pau");
                 var teo = new User("teo", "teo");
                 var romi = new User("romi", "romi");
@@ -810,23 +908,70 @@ namespace Server
                 userRepo.Add(romi);
                 Console.WriteLine("Users created: pau, teo, romi");
 
-                // Creación de Clases
-                // Creador para todas las clases es "pau"
-                var classPast = new OnlineClass("Clase 1", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
-                var classSoon = new OnlineClass("Clase 2", "Charla sobre IA", 5, DateTimeOffset.Now.AddDays(2), 120, pau);
-                var classFuture = new OnlineClass("Clase 3", "Fundamentos de computacion", 20, DateTimeOffset.Now.AddYears(1), 180, pau);
+                // --- 2. Creación de Clases (Generales) ---
+                var classPast = new OnlineClass("Clase 1 (Pasada)", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
+                var classSoon = new OnlineClass("Clase 2 (Próxima)", "Charla sobre IA", 5, DateTimeOffset.Now.AddDays(2), 120, pau);
+                var classFuture = new OnlineClass("Clase 3 (Futura)", "Fundamentos de computacion", 20, DateTimeOffset.Now.AddYears(1), 180, pau);
+                
                 classRepo.Add(classPast);
                 classRepo.Add(classSoon);
                 classRepo.Add(classFuture);
-                Console.WriteLine("Classes created.");
+                Console.WriteLine("General classes created (past, soon, future).");
+
+                // --- 3. Creación de Clases para el Reporte de HOY (Req. 4) ---
                 
-                Console.WriteLine("No inscriptions where created");
+                // Obtenemos fechas de hoy (ej. 10:00 AM y 2:00 PM)
+                DateTimeOffset todayMorning = new DateTimeOffset(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, 10, 0, 0, DateTimeOffset.Now.Offset);
+                DateTimeOffset todayAfternoon = todayMorning.AddHours(4); // 2:00 PM
+
+                // Clase de hoy #1 (con inscripciones, sin imagen)
+                var classToday1 = new OnlineClass("Taller de Docker (Hoy)", "Clase de hoy, sin portada", 10, todayMorning, 60, pau);
+                classRepo.Add(classToday1);
+
+                // Clase de hoy #2 (con inscripciones, con imagen)
+                var classToday2 = new OnlineClass("Taller de Redes (Hoy)", "Clase de hoy, con portada", 15, todayAfternoon, 90, pau);
+                classToday2.Image = "reporte_test_img.jpg"; // Asignamos un nombre de imagen
+                classRepo.Add(classToday2);
+
+                // Clase de hoy #3 (sin inscripciones, con imagen)
+                var classToday3 = new OnlineClass("Charla de C# (Hoy)", "Otra clase de hoy", 20, todayAfternoon.AddHours(2), 45, pau);
+                classToday3.Image = "reporte_test_img_2.jpg";
+                classRepo.Add(classToday3);
+                
+                Console.WriteLine("Classes for today's report created.");
+
+                // --- 4. Creación de Inscripciones (para clases de hoy y pasadas) ---
+                inscriptionRepo.Add(new Inscription(teo, classToday1));
+                inscriptionRepo.Add(new Inscription(romi, classToday1)); // 2 inscriptos
+                
+                inscriptionRepo.Add(new Inscription(teo, classToday2)); // 1 inscripto
+                
+                inscriptionRepo.Add(new Inscription(romi, classPast)); // 1 inscripto en una clase pasada
+                Console.WriteLine("Inscriptions for classes created.");
+
+                // --- 5. Creación de Archivos de Imagen Falsos (para el cálculo de tamaño) ---
+                try
+                {
+                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                    Directory.CreateDirectory(imagesPath); // Asegura que la carpeta exista
+
+                    string filePath1 = Path.Combine(imagesPath, "reporte_test_img.jpg");
+                    File.WriteAllText(filePath1, "Este es un archivo de prueba con un tamaño."); // Crea un archivo con contenido
+
+                    string filePath2 = Path.Combine(imagesPath, "reporte_test_img_2.jpg");
+                    File.WriteAllText(filePath2, "Este es un segundo archivo de prueba, un poco más grande que el primero.");
+                    
+                    Console.WriteLine("Dummy image files for report created in ServerImages.");
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Error creating dummy image files: {e.Message}");
+                }
 
                 Console.WriteLine("Data seeding finished successfully.");
             }
             catch (Exception e)
             {
-                // Este catch es por si se intenta agregar un usuario que ya existe, para que el servidor no se caiga.
                 Console.WriteLine($"Error during data seeding: {e.Message}");
             }
         }
