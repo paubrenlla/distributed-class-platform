@@ -2,7 +2,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading;
+using System.Collections.Concurrent;
 using Common;
 using Repository;
 using Domain;
@@ -20,6 +20,7 @@ namespace Server
         static readonly List<Socket> connectedClients = new List<Socket>();
         static readonly object clientListLock = new object();
         static int maxClients = 3;
+        static readonly ConcurrentDictionary<Socket, CancellationTokenSource> activeReportTasks = new ConcurrentDictionary<Socket, CancellationTokenSource>();
 
         static async Task Main(string[] args)
         {
@@ -75,11 +76,8 @@ namespace Server
                 }
             }
         }
-
-
-
-        static async Task HandleClient(Socket clientSocket)
-        {
+        
+        static async Task HandleClient(Socket clientSocket)        {
             string clientId;
             try
             {
@@ -98,16 +96,27 @@ namespace Server
             
             while (clientActive)
             {
+                Frame receivedFrame = null;
                 try
                 {
-                    Frame receivedFrame = await networkDataHelper.Receive();
+                    receivedFrame = await networkDataHelper.Receive();
                     Console.WriteLine($"Client {clientId} sent command: {receivedFrame.Command}");
 
-                    (var responseFrame, loggedInUser) = await ProcessCommand(
-                        receivedFrame, loggedInUser, networkDataHelper);
+                    if (receivedFrame.Command == ProtocolConstants.CommandGenerateReport)
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            await ProcessAndSendReport(receivedFrame, loggedInUser, networkDataHelper, clientSocket);
+                        });
+                    }
+                    else 
+                    {
+                        (var responseFrame, loggedInUser) = await ProcessCommand(
+                            receivedFrame, loggedInUser, networkDataHelper, clientSocket, null); // null cts
             
-                    if (responseFrame != null)
-                        await networkDataHelper.Send(responseFrame);
+                        if (responseFrame != null)
+                            await networkDataHelper.Send(responseFrame);
+                    }
                 }
                 catch (SocketException)
                 {
@@ -138,7 +147,9 @@ namespace Server
         static async Task<(Frame Frame, User UpdatedUser)> ProcessCommand(
             Frame frame,
             User loggedInUser,
-            NetworkDataHelper networkDataHelper
+            NetworkDataHelper networkDataHelper,
+            Socket clientSocket,
+            CancellationToken? cancellationToken 
         )
         {
             byte[] responseData;
@@ -793,19 +804,44 @@ namespace Server
                         responseMessage = "ERR|Debes iniciar sesión para generar un reporte.";
                         break;
                     }
+                    if (!cancellationToken.HasValue) 
+                    {
+                        responseMessage = "ERR|No se pudo iniciar el reporte (error interno de token).";
+                        break;
+                    }
                     try
                     {
                         Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Iniciando generación de reporte...");
-                
-                        responseMessage = await GenerateReportAsync();
-                
+                        responseMessage = await GenerateReportAsync(cancellationToken.Value); 
                         Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Reporte generado con éxito.");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        responseMessage = "OK|Generación de reporte cancelada por el usuario.";
+                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Reporte cancelado.");
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|Ocurrió un error al generar el reporte: {ex.Message}";
                         Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Error en reporte: {ex.Message}");
                     }
+                    break;
+
+                case ProtocolConstants.CommandCancelReport:
+                    if (loggedInUser == null)
+                    {
+                        responseMessage = "ERR|Debes iniciar sesión.";
+                        break; 
+                    }
+
+                    if (activeReportTasks.TryGetValue(clientSocket, out CancellationTokenSource ctsToCancel))
+                    {
+                        ctsToCancel.Cancel();
+                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Señal de cancelación recibida para {clientSocket.RemoteEndPoint}");
+                        return (null, loggedInUser);
+                    }
+                    
+                    responseMessage = "ERR|No se encontró ningún reporte activo para cancelar.";
                     break;
                 
                 default:
@@ -823,17 +859,19 @@ namespace Server
             }, loggedInUser);
         }
         
-        private static async Task<string> GenerateReportAsync()        
-        {
+        private static async Task<string> GenerateReportAsync(CancellationToken cancellationToken)        {
             Console.WriteLine("Iniciando generación de reporte...");
             string responseMessage = null;
 
-            List<OnlineClass> todayClasses = classRepo.GetAll().Where(c => c.StartDate.Date == DateTimeOffset.Now.Date).ToList();
+            cancellationToken.ThrowIfCancellationRequested();
 
+            List<OnlineClass> todayClasses = classRepo.GetAll().Where(c => c.StartDate.Date == DateTimeOffset.Now.Date).ToList();
+            
             if (todayClasses.Count == 0)
             {
                 return "OK|No hay clases programadas para el día de hoy.";
             }
+            
             int totalClasses = todayClasses.Count;
             double avgDuration = todayClasses.Average(c => c.Duration);
         
@@ -844,8 +882,9 @@ namespace Server
             }
             double avgInscriptions = (totalClasses > 0) ? (double)totalInscriptions / totalClasses : 0;
 
-            var classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();
-            int totalImages = classesWithImages.Count;
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            List<OnlineClass> classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();            int totalImages = classesWithImages.Count;
             long totalSize = 0;
             double avgSize = 0;
 
@@ -856,15 +895,16 @@ namespace Server
 
                 foreach (var c in classesWithImages)
                 {
-                    sizeTasks.Add(GetFileSizeAsync(Path.Combine(imagesPath, c.Image)));
-                }
+                    sizeTasks.Add(GetFileSizeAsync(Path.Combine(imagesPath, c.Image), cancellationToken));                }
 
                 long[] sizes = await Task.WhenAll(sizeTasks);
 
                 totalSize = sizes.Sum();
                 avgSize = (double)totalSize / totalImages;
             }
-
+            
+            cancellationToken.ThrowIfCancellationRequested();
+            
             var report = new StringBuilder();
             
             report.Append("OK|--- Reporte de Clases del Día ---\n");
@@ -883,14 +923,57 @@ namespace Server
             return responseMessage;
         }
         
-        private static async Task<long> GetFileSizeAsync(string filePath)
+        private static async Task<long> GetFileSizeAsync(string filePath, CancellationToken cancellationToken)
         {
-            await Task.Delay(3000); // TODO just for testing purpose
+            await Task.Delay(3000, cancellationToken); // TODO just for testing purpose
+            
+            cancellationToken.ThrowIfCancellationRequested();
+            
             if (!File.Exists(filePath))
             {
                 return 0;
             }
             return new FileInfo(filePath).Length;
+        }
+        
+        private static async Task ProcessAndSendReport(Frame frame, User loggedInUser, NetworkDataHelper networkDataHelper, Socket clientSocket)
+        {
+            var cts = new CancellationTokenSource();
+            
+            if (!activeReportTasks.TryAdd(clientSocket, cts))
+            {
+                try
+                {
+                    byte[] errorData = Encoding.UTF8.GetBytes("ERR|Ya tienes un reporte en progreso.");
+                    await networkDataHelper.Send(new Frame { Header = ProtocolConstants.Response, Command = frame.Command, Data = errorData });
+                }
+                catch (Exception ex) { Console.WriteLine($"Error al notificar al cliente (reporte duplicado): {ex.Message}"); }
+                return;
+            }
+
+            try
+            {
+                (var responseFrame, _) = await ProcessCommand(
+                    frame, loggedInUser, networkDataHelper, clientSocket, cts.Token);
+                
+                if (responseFrame != null)
+                    await networkDataHelper.Send(responseFrame);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Error en Tarea Reporte] {ex.Message}");
+                try
+                {
+                    byte[] errorData = Encoding.UTF8.GetBytes($"ERR|Error interno al generar reporte: {ex.Message}");
+                    await networkDataHelper.Send(new Frame { Header = ProtocolConstants.Response, Command = frame.Command, Data = errorData });
+                }
+                catch { }
+            }
+            finally
+            {
+                activeReportTasks.TryRemove(clientSocket, out _);
+                cts.Dispose();
+            }
         }
         
         private static void SeedData()

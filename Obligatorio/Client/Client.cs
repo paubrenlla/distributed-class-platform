@@ -453,23 +453,67 @@ namespace Client
                         requestFrame = null;
                         break;
                     }
+
                     case "12": // Generar Reporte del Día
-                        Console.WriteLine("Generando reporte... por favor espere.");
-                
-                        requestFrame = new Frame
+                        Console.WriteLine("Generando reporte... Presione [x] para cancelar.");
+
+                        var reportCts = new CancellationTokenSource();
+                        var reportRequestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
                             Command = ProtocolConstants.CommandGenerateReport,
                             Data = null
                         };
+
+                        Task<Frame> reportTask = SendAndReceiveFrame(reportRequestFrame);
+
+                        Task cancelListenerTask = Task.Run(() =>
+                        {
+                            while (!reportCts.Token.IsCancellationRequested)
+                            {
+                                if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.X)
+                                {
+                                    break;
+                                }
+                                Task.Delay(100).Wait(); // Espera corta para no consumir CPU
+                            }
+                        }, reportCts.Token);
+
                         try
                         {
-                            Frame responseFrame = await SendAndReceiveFrame(requestFrame); // <-- LLAMADA SIN TOKEN
-                            ProcessFullResponse(responseFrame);
+                            Task completedTask = await Task.WhenAny(reportTask, cancelListenerTask);
+
+                            if (completedTask == reportTask) // El reporte terminó (con éxito o error) ANTES de presionar X
+                            {
+                                Frame responseFrame = await reportTask;
+                                ProcessFullResponse(responseFrame);
+                            }
+                            else // se presionó X
+                            {
+                                Console.WriteLine("Enviando señal de cancelación al servidor...");
+                                
+                                var cancelFrame = new Frame
+                                {
+                                    Header = ProtocolConstants.Request,
+                                    Command = ProtocolConstants.CommandCancelReport,
+                                    Data = null
+                                };
+                                
+                                await SendFrame(cancelFrame);
+
+                                Console.WriteLine("Esperando confirmación de cancelación del servidor...");
+                                Frame cancelResponse = await reportTask; 
+                                ProcessFullResponse(cancelResponse);
+                            }
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Error al generar el reporte: {ex.Message}");
+                            Console.WriteLine($"Error durante el reporte o la cancelación: {ex.Message}");
+                        }
+                        finally
+                        {
+                            reportCts.Cancel();
+                            reportCts.Dispose();
                         }
 
                         requestFrame = null;
