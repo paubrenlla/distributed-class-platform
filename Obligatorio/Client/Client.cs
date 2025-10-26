@@ -17,20 +17,42 @@ namespace Client
         {
             Console.WriteLine("Iniciando Cliente...");
 
-            SettingsManager settingsMgr = new SettingsManager();
+            string clientHostnameString = Environment.GetEnvironmentVariable(ClientConfig.ClientIpConfigKey) ?? "0.0.0.0";
+            Console.WriteLine($"client host: {clientHostnameString}");
 
-            // IP y puerto del cliente
-            IPAddress clientIp = IPAddress.Parse(settingsMgr.ReadSetting(ClientConfig.ClientIpConfigKey));
-            int clientPort = int.Parse(settingsMgr.ReadSetting(ClientConfig.ClientPortConfigKey));
+            IPAddress clientIp;
+            if (clientHostnameString == "0.0.0.0" || clientHostnameString == "client")
+            {
+                clientIp = IPAddress.Any;
+            }
+            else
+            {
+                IPAddress[] clientAddresses = Dns.GetHostAddresses(clientHostnameString);
+                clientIp = clientAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                           ?? throw new Exception($"Cannot resolve client hostname: {clientHostnameString}");
+            }
+
+            string clientPortString = Environment.GetEnvironmentVariable(ClientConfig.ClientPortConfigKey) ?? "0";
+            int clientPort = int.Parse(clientPortString);
             IPEndPoint localEndpoint = new IPEndPoint(clientIp, clientPort);
 
             Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             clientSocket.Bind(localEndpoint);
 
-            // IP y puerto del servidor
-            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
-            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.SeverPortConfigKey));
+// 🔹 Configurar conexión al servidor
+            string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "127.0.0.1";
+            IPAddress[] serverAddresses = Dns.GetHostAddresses(serverHostnameString);
+            IPAddress? serverIp = serverAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
+            if (serverIp == null)
+            {
+                throw new Exception($"Cannot resolve server hostname: {serverHostnameString}");
+            }
+            Console.WriteLine($"Server IP {serverIp}");
+
+            string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.SeverPortConfigKey) ?? "5000";
+            int serverPort = int.Parse(serverPortString);
             IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
+
 
             try
             {

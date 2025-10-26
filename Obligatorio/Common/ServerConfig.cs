@@ -8,7 +8,9 @@ namespace Common
 {
     public static class ServerConfig
     {
-        public static string ServerIpConfigKey = "ServerIpAddress";
-        public static string SeverPortConfigKey = "ServerPort";
+        public static string ServerIpConfigKey = "SERVER_HOSTNAME";
+        public static string SeverPortConfigKey = "SERVER_PORT";
+        public static string ReceivedFilesFolder = "RECEIVE_DIRECTORY";
     }
+
 }
