@@ -26,11 +26,32 @@ namespace Server
         {
             SeedData();
             Console.WriteLine("Server starting with preloaded data...");
-            SettingsManager settingsMgr = new SettingsManager();
+            string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
+            string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.SeverPortConfigKey) ?? "5000";
 
-            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
-            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.SeverPortConfigKey));
+            IPAddress serverIp;
+            if (serverHostnameString == "0.0.0.0")
+            {
+                serverIp = IPAddress.Any;
+            }
+            else
+            {
+                IPAddress[] addresses = Dns.GetHostAddresses(serverHostnameString);
+                serverIp = addresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                           ?? throw new Exception($"Cannot resolve hostname: {serverHostnameString}");
+            }
+
+            int serverPort = int.Parse(serverPortString);
             IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
+
+            
+            string receiveDirectory = Environment.GetEnvironmentVariable(ServerConfig.ReceivedFilesFolder) ?? "ServerImages";
+            if (!Directory.Exists(receiveDirectory))
+            {
+                Directory.CreateDirectory(receiveDirectory);
+            }
+            Console.WriteLine($"🗂️ Carpeta de imágenes del servidor: {Path.GetFullPath(receiveDirectory)}");
+
 
             serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             serverSocket.Bind(serverEndpoint);
