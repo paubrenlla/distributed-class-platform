@@ -39,7 +39,6 @@ namespace Client
             Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             clientSocket.Bind(localEndpoint);
 
-// 🔹 Configurar conexión al servidor
             string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "127.0.0.1";
             IPAddress[] serverAddresses = Dns.GetHostAddresses(serverHostnameString);
             IPAddress? serverIp = serverAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
@@ -413,7 +412,7 @@ namespace Client
                                 break;
                             }
 
-                            string[] parts = metaStr.Substring(3).Split('|'); // "OK|filename|filesize"
+                            string[] parts = metaStr.Substring(3).Split('|');
                             if (parts.Length < 2)
                             {
                                 Console.WriteLine("Error en metadata recibida.");
