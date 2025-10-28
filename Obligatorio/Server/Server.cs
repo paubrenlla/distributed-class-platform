@@ -21,7 +21,8 @@ namespace Server
         static readonly object clientListLock = new object();
         static int maxClients = 3;
         static readonly ConcurrentDictionary<Socket, CancellationTokenSource> activeReportTasks = new ConcurrentDictionary<Socket, CancellationTokenSource>();
-
+        private static CancellationTokenSource serverReportCts = null;
+        
         static async Task Main(string[] args)
         {
             SeedData();
@@ -59,7 +60,18 @@ namespace Server
             Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}");
             Console.WriteLine("Presiona Ctrl+C para cerrar (en Docker, se detiene con docker stop)");
 
-            await AcceptClients();
+            Task acceptClientsTask = AcceptClients();
+            
+            Task consoleListenerTask = ListenForServerCommands();
+            
+            await Task.WhenAny(acceptClientsTask, consoleListenerTask);
+            
+            isRunning = false;
+            serverReportCts?.Cancel();
+            Console.WriteLine("Cerrando sockets...");
+            CloseAllClientSockets(); 
+            try { serverSocket?.Close(); } catch { }
+            Console.WriteLine("Servidor detenido.");
         }
 
         static async Task AcceptClients()
@@ -98,6 +110,19 @@ namespace Server
             }
         }
         
+        static void CloseAllClientSockets()
+        {
+            lock (clientListLock)
+            {
+                foreach (var clientSocket in connectedClients)
+                {
+                    try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
+                    try { clientSocket.Close(); } catch { }
+                }
+                connectedClients.Clear();
+            }
+        }
+        
         static async Task HandleClient(Socket clientSocket)        {
             string clientId;
             try
@@ -122,22 +147,12 @@ namespace Server
                 {
                     receivedFrame = await networkDataHelper.Receive();
                     Console.WriteLine($"Client {clientId} sent command: {receivedFrame.Command}");
-
-                    if (receivedFrame.Command == ProtocolConstants.CommandGenerateReport)
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            await ProcessAndSendReport(receivedFrame, loggedInUser, networkDataHelper, clientSocket);
-                        });
-                    }
-                    else 
-                    {
-                        (var responseFrame, loggedInUser) = await ProcessCommand(
-                            receivedFrame, loggedInUser, networkDataHelper, clientSocket, null); // null cts
-            
-                        if (responseFrame != null)
-                            await networkDataHelper.Send(responseFrame);
-                    }
+                    
+                    (var responseFrame, loggedInUser) = await ProcessCommand(
+                        receivedFrame, loggedInUser, networkDataHelper, clientSocket, null); // null cts
+        
+                    if (responseFrame != null)
+                        await networkDataHelper.Send(responseFrame);
                 }
                 catch (SocketException)
                 {
@@ -162,9 +177,7 @@ namespace Server
             }
             catch { }
         }
-
-
-
+        
         static async Task<(Frame Frame, User UpdatedUser)> ProcessCommand(
             Frame frame,
             User loggedInUser,
@@ -819,52 +832,6 @@ namespace Server
                     }
                     break;
                 
-                case ProtocolConstants.CommandGenerateReport:
-                    if (loggedInUser == null)
-                    {
-                        responseMessage = "ERR|Debes iniciar sesión para generar un reporte.";
-                        break;
-                    }
-                    if (!cancellationToken.HasValue) 
-                    {
-                        responseMessage = "ERR|No se pudo iniciar el reporte (error interno de token).";
-                        break;
-                    }
-                    try
-                    {
-                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Iniciando generación de reporte...");
-                        responseMessage = await GenerateReportAsync(cancellationToken.Value); 
-                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Reporte generado con éxito.");
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        responseMessage = "OK|Generación de reporte cancelada por el usuario.";
-                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Reporte cancelado.");
-                    }
-                    catch (Exception ex)
-                    {
-                        responseMessage = $"ERR|Ocurrió un error al generar el reporte: {ex.Message}";
-                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Error en reporte: {ex.Message}");
-                    }
-                    break;
-
-                case ProtocolConstants.CommandCancelReport:
-                    if (loggedInUser == null)
-                    {
-                        responseMessage = "ERR|Debes iniciar sesión.";
-                        break; 
-                    }
-
-                    if (activeReportTasks.TryGetValue(clientSocket, out CancellationTokenSource ctsToCancel))
-                    {
-                        ctsToCancel.Cancel();
-                        Console.WriteLine($"[Usuario '{loggedInUser.Username}'] Señal de cancelación recibida para {clientSocket.RemoteEndPoint}");
-                        return (null, loggedInUser);
-                    }
-                    
-                    responseMessage = "ERR|No se encontró ningún reporte activo para cancelar.";
-                    break;
-                
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
                     break;
@@ -880,68 +847,143 @@ namespace Server
             }, loggedInUser);
         }
         
-        private static async Task<string> GenerateReportAsync(CancellationToken cancellationToken)        {
-            Console.WriteLine("Iniciando generación de reporte...");
-            string responseMessage = null;
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            List<OnlineClass> todayClasses = classRepo.GetAll().Where(c => c.StartDate.Date == DateTimeOffset.Now.Date).ToList();
-            
-            if (todayClasses.Count == 0)
+        private static async Task ListenForServerCommands()
+        {
+            Console.WriteLine("Escriba 'report' para generar el reporte diario, 'cancel' para detenerlo, o 'exit' para cerrar el servidor.");
+            while (isRunning)
             {
-                return "OK|No hay clases programadas para el día de hoy.";
-            }
-            
-            int totalClasses = todayClasses.Count;
-            double avgDuration = todayClasses.Average(c => c.Duration);
-        
-            int totalInscriptions = 0;
-            foreach (var c in todayClasses)
-            {
-                totalInscriptions += inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
-            }
-            double avgInscriptions = (totalClasses > 0) ? (double)totalInscriptions / totalClasses : 0;
+                string command = await Task.Run(() => Console.ReadLine()?.Trim().ToLower());
 
-            cancellationToken.ThrowIfCancellationRequested();
-            
-            List<OnlineClass> classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();            int totalImages = classesWithImages.Count;
-            long totalSize = 0;
-            double avgSize = 0;
+                if (!isRunning) break; // Salir si el servidor se está deteniendo
 
-            if (totalImages > 0)
-            {
-                var sizeTasks = new List<Task<long>>();
-                string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
-
-                foreach (var c in classesWithImages)
+                switch (command)
                 {
-                    sizeTasks.Add(GetFileSizeAsync(Path.Combine(imagesPath, c.Image), cancellationToken));                }
+                    case "report":
+                        if (serverReportCts != null)
+                        {
+                            Console.WriteLine("Ya hay un reporte generándose.");
+                        }
+                        else
+                        {
+                            serverReportCts = new CancellationTokenSource();
+                            Console.WriteLine("Iniciando generación de reporte...");
+                            _ = GenerateAndPrintReportAsync(serverReportCts.Token);
+                        }
+                        break;
 
-                long[] sizes = await Task.WhenAll(sizeTasks);
+                    case "cancel":
+                        if (serverReportCts != null)
+                        {
+                            Console.WriteLine("Enviando señal de cancelación...");
+                            serverReportCts.Cancel();
+                        }
+                        else
+                        {
+                            Console.WriteLine("No hay ningún reporte en ejecución para cancelar.");
+                        }
+                        break;
 
-                totalSize = sizes.Sum();
-                avgSize = (double)totalSize / totalImages;
+                    case "exit":
+                        Console.WriteLine("Iniciando cierre del servidor...");
+                        isRunning = false;
+                        serverReportCts?.Cancel();
+                        try { serverSocket?.Close(); } catch { }
+                        break;
+
+                    default:
+                        if (!string.IsNullOrEmpty(command))
+                            Console.WriteLine($"Comando desconocido: '{command}'. Comandos válidos: report, cancel, exit.");
+                        break;
+                }
             }
+        }
+        private static async Task GenerateAndPrintReportAsync(CancellationToken token)        {
+            try
+            {
+                string responseMessage = null;
+                
+                List<OnlineClass> todayClasses = classRepo.GetAll().Where(c => c.StartDate.Date == DateTimeOffset.Now.Date).ToList();
             
-            cancellationToken.ThrowIfCancellationRequested();
-            
-            var report = new StringBuilder();
-            
-            report.Append("OK|--- Reporte de Clases del Día ---\n");
-            report.Append($"Total de Clases: {totalClasses}\n");
-            report.Append($"Duración Promedio: {avgDuration:F2} min\n");
-            report.Append($"Total de Inscriptos: {totalInscriptions}\n");
-            report.Append($"Promedio de Inscriptos: {avgInscriptions:F2}\n");
-            report.Append($"Clases con Portada: {totalImages}\n");
-            report.Append($"Tamaño Total de Portadas: {totalSize} bytes\n");
-            report.Append($"Tamaño Promedio de Portadas: {avgSize:F2} bytes");
-            
-            responseMessage = report.ToString();
+                if (todayClasses.Count == 0)
+                {
+                    Console.WriteLine("\n--- Reporte del Día ---");
+                    Console.WriteLine("No hay clases programadas para hoy.");
+                    Console.WriteLine("-----------------------\n");
+                    return;
+                }
+                
+                token.ThrowIfCancellationRequested();
+
+                if (todayClasses.Count == 0)
+                {
+                    Console.WriteLine("\n--- Reporte del Día ---");
+                    Console.WriteLine("No hay clases programadas para hoy.");
+                    Console.WriteLine("-----------------------\n");
+                    return; // Termina
+                }
+
+                int totalClasses = todayClasses.Count;
+                double avgDuration = todayClasses.Average(c => c.Duration);
         
-            Console.WriteLine("Reporte generado con éxito.");
-            
-            return responseMessage;
+                int totalInscriptions = 0;
+                foreach (var c in todayClasses)
+                {
+                    totalInscriptions += inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
+                }
+                double avgInscriptions = (totalClasses > 0) ? (double)totalInscriptions / totalClasses : 0;
+                
+                token.ThrowIfCancellationRequested();
+
+                List<OnlineClass> classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();            int totalImages = classesWithImages.Count;
+                long totalSize = 0;
+                double avgSize = 0;
+                
+                if (totalImages > 0)
+                {
+                    var sizeTasks = new List<Task<long>>();
+                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+
+                    foreach (var c in classesWithImages)
+                    {
+                        sizeTasks.Add(GetFileSizeAsync(Path.Combine(imagesPath, c.Image), token));                
+                    }
+
+                    token.ThrowIfCancellationRequested();
+
+                    long[] sizes = await Task.WhenAll(sizeTasks);
+
+                    totalSize = sizes.Sum();
+                    avgSize = (double)totalSize / totalImages;
+                }
+                
+                token.ThrowIfCancellationRequested();
+                
+                Console.WriteLine("OK|--- Reporte de Clases del Día ---");
+                Console.WriteLine($"Total de Clases: {totalClasses}");
+                Console.WriteLine($"Duración Promedio: {avgDuration:F2} min");
+                Console.WriteLine($"Total de Inscriptos: {totalInscriptions}");
+                Console.WriteLine($"Promedio de Inscriptos: {avgInscriptions:F2}");
+                Console.WriteLine($"Clases con Portada: {totalImages}");
+                Console.WriteLine($"Tamaño Total de Portadas: {totalSize} bytes");
+                Console.WriteLine($"Tamaño Promedio de Portadas: {avgSize:F2} bytes");
+                Console.WriteLine("-------------------------------\n");
+                Console.WriteLine("Reporte generado con éxito.");
+                
+            }
+            catch (TaskCanceledException)
+            {
+                Console.WriteLine("\n*** La generación del reporte fue cancelada. ***\n");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"\n*** Error al generar el reporte: {ex.Message} ***\n");
+            }
+            finally
+            {
+                serverReportCts?.Dispose();
+                serverReportCts = null;
+                Console.Write("Ingrese comando (report, cancel, exit): ");
+            }
         }
         
         private static async Task<long> GetFileSizeAsync(string filePath, CancellationToken cancellationToken)

@@ -32,10 +32,6 @@ public static class ProtocolConstants
    
     public const short CommandUploadImage = 30;
     public const short CommandDownloadImage = 31;
-    
-    // Rango 40+: Funciones de Reportes
-    public const short CommandGenerateReport = 40;
-    public const short CommandCancelReport = 41;
 
     public const int MaxFilePartSize = 32768;
     public const int FileNameLengthSize = 4;

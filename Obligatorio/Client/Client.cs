@@ -39,7 +39,6 @@ namespace Client
             Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             clientSocket.Bind(localEndpoint);
 
-// 🔹 Configurar conexión al servidor
             string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "127.0.0.1";
             IPAddress[] serverAddresses = Dns.GetHostAddresses(serverHostnameString);
             IPAddress? serverIp = serverAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
@@ -189,7 +188,6 @@ namespace Client
                 Console.WriteLine("9. Cerrar sesion");
                 Console.WriteLine("10. Salir de la Aplicación");
                 Console.WriteLine("11. Descargar portada");
-                Console.WriteLine("12. Generar reporte del dia");
                 Console.Write("Seleccione una opción: ");
 
                 string input = Console.ReadLine();
@@ -414,7 +412,7 @@ namespace Client
                                 break;
                             }
 
-                            string[] parts = metaStr.Substring(3).Split('|'); // "OK|filename|filesize"
+                            string[] parts = metaStr.Substring(3).Split('|');
                             if (parts.Length < 2)
                             {
                                 Console.WriteLine("Error en metadata recibida.");
@@ -475,71 +473,6 @@ namespace Client
                         requestFrame = null;
                         break;
                     }
-
-                    case "12": // Generar Reporte del Día
-                        Console.WriteLine("Generando reporte... Presione [x] para cancelar.");
-
-                        var reportCts = new CancellationTokenSource();
-                        var reportRequestFrame = new Frame
-                        {
-                            Header = ProtocolConstants.Request,
-                            Command = ProtocolConstants.CommandGenerateReport,
-                            Data = null
-                        };
-
-                        Task<Frame> reportTask = SendAndReceiveFrame(reportRequestFrame);
-
-                        Task cancelListenerTask = Task.Run(() =>
-                        {
-                            while (!reportCts.Token.IsCancellationRequested)
-                            {
-                                if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.X)
-                                {
-                                    break;
-                                }
-                                Task.Delay(100).Wait(); // Espera corta para no consumir CPU
-                            }
-                        }, reportCts.Token);
-
-                        try
-                        {
-                            Task completedTask = await Task.WhenAny(reportTask, cancelListenerTask);
-
-                            if (completedTask == reportTask) // El reporte terminó (con éxito o error) ANTES de presionar X
-                            {
-                                Frame responseFrame = await reportTask;
-                                ProcessFullResponse(responseFrame);
-                            }
-                            else // se presionó X
-                            {
-                                Console.WriteLine("Enviando señal de cancelación al servidor...");
-                                
-                                var cancelFrame = new Frame
-                                {
-                                    Header = ProtocolConstants.Request,
-                                    Command = ProtocolConstants.CommandCancelReport,
-                                    Data = null
-                                };
-                                
-                                await SendFrame(cancelFrame);
-
-                                Console.WriteLine("Esperando confirmación de cancelación del servidor...");
-                                Frame cancelResponse = await reportTask; 
-                                ProcessFullResponse(cancelResponse);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Error durante el reporte o la cancelación: {ex.Message}");
-                        }
-                        finally
-                        {
-                            reportCts.Cancel();
-                            reportCts.Dispose();
-                        }
-
-                        requestFrame = null;
-                        break;
 
                     default:
                         Console.WriteLine("Opción no válida. Intente de nuevo.");
