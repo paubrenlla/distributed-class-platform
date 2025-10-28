@@ -1,4 +1,4 @@
-﻿version: "3.9"
+﻿#version: "3.9"
 
 services:
   server:
@@ -9,9 +9,9 @@ services:
     environment:
       - SERVER_HOSTNAME=0.0.0.0
       - SERVER_PORT=5000
-      - RECEIVE_DIRECTORY=/app/ServerImages
+      - RECEIVE_DIRECTORY=/app/publish/ServerImages
     volumes:
-      - ./Server/ServerImages:/app/ServerImages
+      - ./Server/ServerImages:/app/publish/ServerImages
     ports:
       - "5000:5000"
     networks:
