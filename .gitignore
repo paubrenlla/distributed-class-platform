@@ -794,3 +794,5 @@ Temporary Items
 # Additional files built by Visual Studio
 
 # End of https://www.toptal.com/developers/gitignore/api/csharp,rider,jetbrains,macos,visualstudio
+
+Obligatorio/ClienteImages/

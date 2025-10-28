@@ -2,7 +2,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading;
+using System.Collections.Concurrent;
 using Common;
 using Repository;
 using Domain;
@@ -14,106 +14,116 @@ namespace Server
         static UserRepository userRepo = new UserRepository();
         static readonly OnlineClassRepository classRepo = new OnlineClassRepository();
         static readonly InscriptionRepository inscriptionRepo = new InscriptionRepository();
-        public static readonly object GlobalLock = new object();
+        public static readonly SemaphoreSlim ImageSemaphore = new SemaphoreSlim(1, 1); //esto es para hacer mutua exlucion con await en subir imagenes y eliminar clases
         static bool isRunning = true;
         static Socket serverSocket;
         static readonly List<Socket> connectedClients = new List<Socket>();
         static readonly object clientListLock = new object();
         static int maxClients = 3;
-
-        static void Main(string[] args)
+        static readonly ConcurrentDictionary<Socket, CancellationTokenSource> activeReportTasks = new ConcurrentDictionary<Socket, CancellationTokenSource>();
+        private static CancellationTokenSource serverReportCts = null;
+        
+        static async Task Main(string[] args)
         {
             SeedData();
             Console.WriteLine("Server starting with preloaded data...");
-            SettingsManager settingsMgr = new SettingsManager();
+            string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
+            string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.SeverPortConfigKey) ?? "5000";
 
-            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
-            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.SeverPortConfigKey));
+            IPAddress serverIp;
+            if (serverHostnameString == "0.0.0.0")
+            {
+                serverIp = IPAddress.Any;
+            }
+            else
+            {
+                IPAddress[] addresses = Dns.GetHostAddresses(serverHostnameString);
+                serverIp = addresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                           ?? throw new Exception($"Cannot resolve hostname: {serverHostnameString}");
+            }
+
+            int serverPort = int.Parse(serverPortString);
             IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
+
+            
+            string receiveDirectory = Environment.GetEnvironmentVariable(ServerConfig.ReceivedFilesFolder) ?? "ServerImages";
+            if (!Directory.Exists(receiveDirectory))
+            {
+                Directory.CreateDirectory(receiveDirectory);
+            }
+            Console.WriteLine($"🗂️ Carpeta de imágenes del servidor: {Path.GetFullPath(receiveDirectory)}");
+
 
             serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             serverSocket.Bind(serverEndpoint);
             serverSocket.Listen(10);
-            Console.WriteLine("");
-            Console.WriteLine("");
-            Console.WriteLine("Escriba 'exit' para cerrar el servidor");
-            Console.WriteLine("");
-            Console.WriteLine("");
-            Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}...");
+            Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}");
+            Console.WriteLine("Presiona Ctrl+C para cerrar (en Docker, se detiene con docker stop)");
 
-            Thread acceptThread = new Thread(AcceptClients);
-            acceptThread.Start();
-
-            while (isRunning)
-            {
-                string command = Console.ReadLine();
-                if (command?.Equals("exit", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    Console.WriteLine("Cerrando servidor de forma controlada...");
-                    isRunning = false;
-
-                    serverSocket.Close();
-
-                    lock (clientListLock)
-                    {
-                        foreach (var client in connectedClients)
-                        {
-                            try { client.Shutdown(SocketShutdown.Both); } catch { }
-                            client.Close();
-                        }
-                        connectedClients.Clear();
-                    }
-
-                    break;
-                }
-            }
-
-            Console.WriteLine("Servidor cerrado.");
+            Task acceptClientsTask = AcceptClients();
+            
+            Task consoleListenerTask = ListenForServerCommands();
+            
+            await Task.WhenAny(acceptClientsTask, consoleListenerTask);
+            
+            isRunning = false;
+            serverReportCts?.Cancel();
+            Console.WriteLine("Cerrando sockets...");
+            CloseAllClientSockets(); 
+            try { serverSocket?.Close(); } catch { }
+            Console.WriteLine("Servidor detenido.");
         }
 
-        static void AcceptClients()
+        static async Task AcceptClients()
         {
-            try
+            while (isRunning)
             {
-                while (isRunning)
+                try
                 {
-                    Socket clientSocket = serverSocket.Accept();
+                    Console.WriteLine("Esperando nuevo cliente...");
+                    Socket clientSocket = await serverSocket.AcceptAsync();
+                    Console.WriteLine($"Nuevo socket aceptado: {clientSocket.RemoteEndPoint}");
 
                     lock (clientListLock)
                     {
-                        if (connectedClients.Count >= maxClients)
-                        {
-                            Console.WriteLine("Rechazando cliente: límite máximo alcanzado.");
-                            clientSocket.Close();
-                            continue;
-                        }
-
                         connectedClients.Add(clientSocket);
                     }
 
-                    Console.WriteLine($"Cliente conectado ({connectedClients.Count}/{maxClients})");
+                    Console.WriteLine($"Cliente conectado: {clientSocket.RemoteEndPoint}");
 
-                    Thread t = new Thread(() =>
+                    _ = Task.Run(async () =>
                     {
-                        HandleClient(clientSocket);
-                        lock (clientListLock)
-                            connectedClients.Remove(clientSocket);
+                        try
+                        {
+                            await HandleClient(clientSocket);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Excepción en cliente {clientSocket.RemoteEndPoint}] {ex.Message}");
+                        }
                     });
-                    t.Start();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Error en AcceptClients] {ex.Message}");
                 }
             }
-            catch (SocketException)
+        }
+        
+        static void CloseAllClientSockets()
+        {
+            lock (clientListLock)
             {
-                if (isRunning)
-                    Console.WriteLine("Error inesperado en Accept().");
-                else
-                    Console.WriteLine("Accept() terminó porque el servidor se cerró.");
+                foreach (var clientSocket in connectedClients)
+                {
+                    try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
+                    try { clientSocket.Close(); } catch { }
+                }
+                connectedClients.Clear();
             }
         }
-
-
-        static void HandleClient(Socket clientSocket)
-        {
+        
+        static async Task HandleClient(Socket clientSocket)        {
             string clientId;
             try
             {
@@ -128,19 +138,21 @@ namespace Server
 
             bool clientActive = true;
             NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
-
             User loggedInUser = null;
-
+            
             while (clientActive)
             {
+                Frame receivedFrame = null;
                 try
                 {
-                    Frame receivedFrame = networkDataHelper.Receive();
+                    receivedFrame = await networkDataHelper.Receive();
                     Console.WriteLine($"Client {clientId} sent command: {receivedFrame.Command}");
-
-                    Frame responseFrame = ProcessCommand(receivedFrame, ref loggedInUser, networkDataHelper);
+                    
+                    (var responseFrame, loggedInUser) = await ProcessCommand(
+                        receivedFrame, loggedInUser, networkDataHelper, clientSocket, null); // null cts
+        
                     if (responseFrame != null)
-                        networkDataHelper.Send(responseFrame);
+                        await networkDataHelper.Send(responseFrame);
                 }
                 catch (SocketException)
                 {
@@ -163,11 +175,16 @@ namespace Server
                 clientSocket.Shutdown(SocketShutdown.Both);
                 clientSocket.Close();
             }
-            catch {}
+            catch { }
         }
-
-
-        static Frame ProcessCommand(Frame frame, ref User loggedInUser, NetworkDataHelper networkDataHelper) 
+        
+        static async Task<(Frame Frame, User UpdatedUser)> ProcessCommand(
+            Frame frame,
+            User loggedInUser,
+            NetworkDataHelper networkDataHelper,
+            Socket clientSocket,
+            CancellationToken? cancellationToken 
+        )
         {
             byte[] responseData;
             string responseMessage = null;
@@ -287,6 +304,7 @@ namespace Server
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
+                
                 case ProtocolConstants.CommandSubscribeToClass:
                     if (loggedInUser == null)
                     {
@@ -296,8 +314,6 @@ namespace Server
                     try
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
-                        lock (Program.GlobalLock)
-                        {
                             var classToJoin = classRepo.GetById(classId);
                             if (classToJoin == null) throw new Exception("La clase no existe.");
 
@@ -312,7 +328,7 @@ namespace Server
                             inscriptionRepo.Add(newInscription);
 
                             responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";
-                        }
+                        
                     }
                     catch (Exception ex)
                     {
@@ -330,8 +346,7 @@ namespace Server
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
         
-                        lock (Program.GlobalLock)
-                        {
+                        
                             var inscription = inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId);
                             if (inscription == null) 
                                 throw new Exception("No estás inscrito en esta clase.");
@@ -343,7 +358,7 @@ namespace Server
                             inscription.Cancel();
             
                             responseMessage = $"OK|Tu inscripción a la clase '{inscription.Class.Name}' ha sido cancelada.";
-                        }
+                        
                     }
                     catch (Exception ex)
                     {
@@ -407,7 +422,6 @@ namespace Server
                     }
                     break;
                 }
-
 
                 case ProtocolConstants.SearchClassesByNamwe:
                 {
@@ -507,6 +521,7 @@ namespace Server
                     }
                     break;
                 }
+                
                 case ProtocolConstants.CommandModifyClass:
                     if (loggedInUser == null)
                     {
@@ -521,8 +536,7 @@ namespace Server
 
                         int classId = int.Parse(parts[0]);
                  
-                        lock (Program.GlobalLock) 
-                        {
+                        
                             var classToModify = classRepo.GetById(classId);
                             if (classToModify == null) throw new Exception("La clase no existe.");
     
@@ -540,14 +554,14 @@ namespace Server
                             classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions);
 
                             responseMessage = $"OK|Clase '{newName}' modificada con éxito.";
-                        }
+                        
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
-
+                
                 case ProtocolConstants.CommandDeleteClass:
                     if (loggedInUser == null)
                     {
@@ -558,7 +572,8 @@ namespace Server
                     {
                         int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
         
-                        lock (Program.GlobalLock)
+                        await Program.ImageSemaphore.WaitAsync();
+                        try
                         {
                             var classToDelete = classRepo.GetById(classId);
                             if (classToDelete == null) throw new Exception("La clase no existe.");
@@ -568,11 +583,34 @@ namespace Server
             
                             if (inscriptionRepo.GetActiveClassByClassId(classId).Any())
                                 throw new Exception("No se puede eliminar una clase con usuarios inscriptos.");
+                            
+                            if (!string.IsNullOrEmpty(classToDelete.Image))
+                            {
+                                string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                                string imagePath = Path.Combine(imagesPath, classToDelete.Image);
+
+                                if (File.Exists(imagePath))
+                                {
+                                    try
+                                    {
+                                        File.Delete(imagePath);
+                                        Console.WriteLine($"Imagen '{classToDelete.Image}' eliminada del servidor.");
+                                    }
+                                    catch (Exception ex) 
+                                    {
+                                        Console.WriteLine($"⚠️ No se pudo eliminar la imagen '{classToDelete.Image}': {ex.Message}");
+                                    }
+                                }
+                            }
 
                             classToDelete.Eliminar(); 
                             classRepo.Delete(classId);
 
                             responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
+                        }
+                        finally
+                        {
+                            Program.ImageSemaphore.Release();
                         }
                     }
                     catch (Exception ex)
@@ -580,6 +618,7 @@ namespace Server
                         responseMessage = $"ERR|{ex.Message}";
                     }
                     break;
+                
                 case ProtocolConstants.CommandUploadImage:
                     if (loggedInUser == null)
                     {
@@ -589,9 +628,10 @@ namespace Server
 
                     try
                     {
-                        lock (Program.GlobalLock)
+                        await Program.ImageSemaphore.WaitAsync();
+                        try
                         {
-                            byte[] classIdImageBytes = networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
+                            byte[] classIdImageBytes = await networkDataHelper.Receive(ProtocolConstants.ClassIdSize);
                             int classIdImage = BitConverter.ToInt32(classIdImageBytes);
                             OnlineClass classToAddImage = classRepo.GetById(classIdImage);
                             if (classToAddImage == null) throw new Exception("La clase no existe.");
@@ -599,13 +639,14 @@ namespace Server
                             if (classToAddImage.Creator.Id != loggedInUser.Id)
                                 throw new Exception("No tienes permiso para modificar esta clase.");
 
-                            byte[] fileNameLengthBuffer = networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
+                            byte[] fileNameLengthBuffer =
+                                await networkDataHelper.Receive(ProtocolConstants.FileNameLengthSize);
                             int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
 
-                            byte[] fileNameBytes = networkDataHelper.Receive(fileNameLength);
+                            byte[] fileNameBytes = await networkDataHelper.Receive(fileNameLength);
                             string fileName = Encoding.UTF8.GetString(fileNameBytes);
 
-                            byte[] fileSizeBuffer = networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
+                            byte[] fileSizeBuffer = await networkDataHelper.Receive(ProtocolConstants.FileLengthSize);
                             long fileSize = BitConverter.ToInt64(fileSizeBuffer);
 
                             string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
@@ -620,16 +661,20 @@ namespace Server
                             {
                                 responseMessage =
                                     $"ERR|El nombre de imagen '{fileName}' ya está siendo usado por la clase {otherClassWithSameImage.Id}.";
-                                return new Frame
-                                {
-                                    Header = ProtocolConstants.Response,
-                                    Command = ProtocolConstants.CommandUploadImage,
-                                    Data = Encoding.UTF8.GetBytes(responseMessage)
-                                };
+                                return (
+                                    new Frame
+                                    {
+                                        Header = ProtocolConstants.Response,
+                                        Command = ProtocolConstants.CommandUploadImage,
+                                        Data = Encoding.UTF8.GetBytes(responseMessage)
+                                    },
+                                    loggedInUser
+                                );
+
                             }
 
                             responseMessage = "OK|Listo para recibir imagen";
-                            networkDataHelper.Send(new Frame
+                            await networkDataHelper.Send(new Frame
                             {
                                 Header = ProtocolConstants.Response,
                                 Command = ProtocolConstants.CommandUploadImage,
@@ -651,19 +696,20 @@ namespace Server
 
                                 if (!isLastPart)
                                 {
-                                    Console.WriteLine($"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
-                                    buffer = networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
+                                    Console.WriteLine(
+                                        $"Receiving segment #{currentPart} of size {ProtocolConstants.MaxFilePartSize}");
+                                    buffer = await networkDataHelper.Receive(ProtocolConstants.MaxFilePartSize);
                                     offset += ProtocolConstants.MaxFilePartSize;
                                 }
                                 else
                                 {
                                     long lastPartSize = fileSize - offset;
                                     Console.WriteLine($"Receiving segment #{currentPart} of size {lastPartSize}");
-                                    buffer = networkDataHelper.Receive((int)lastPartSize);
+                                    buffer = await networkDataHelper.Receive((int)lastPartSize);
                                     offset += lastPartSize;
                                 }
 
-                                fsh.Write(filePath, buffer);
+                                await fsh.Write(filePath, buffer);
                                 currentPart++;
                             }
 
@@ -680,7 +726,12 @@ namespace Server
                             Console.WriteLine($"Imagen recibida y guardada en: {filePath}");
                             classToAddImage.Image = fileName;
 
-                            responseMessage = $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
+                            responseMessage =
+                                $"OK|Imagen '{fileName}' recibida y asociada a la clase {classToAddImage.Id}";
+                        }
+                        finally
+                        {
+                            Program.ImageSemaphore.Release();
                         }
                     }
                     catch (Exception ex)
@@ -732,7 +783,7 @@ namespace Server
                         Data = responseData
                     };
                     
-                    networkDataHelper.Send(metaFrame);
+                    await networkDataHelper.Send(metaFrame);
                     
                     FileStreamHelper fsh = new FileStreamHelper();
                     long offset = 0;
@@ -746,17 +797,17 @@ namespace Server
 
                         if (!isLastPart)
                         {
-                            buffer = fsh.Read(filePath, offset, ProtocolConstants.MaxFilePartSize);
+                            buffer = await fsh.Read(filePath, offset, ProtocolConstants.MaxFilePartSize);
                             offset += ProtocolConstants.MaxFilePartSize;
                         }
                         else
                         {
                             long lastPartSize = fileSize - offset;
-                            buffer = fsh.Read(filePath, offset, (int)lastPartSize);
+                            buffer = await fsh.Read(filePath, offset, (int)lastPartSize);
                             offset += lastPartSize;
                         }
 
-                        networkDataHelper.Send(buffer);
+                        await networkDataHelper.Send(buffer);
                         currentPart++;
                     }
                     
@@ -767,8 +818,7 @@ namespace Server
                     {
                         responseMessage = $"ERR|{ex.Message}";
                     }
-                    return null;
-
+                    return (null, loggedInUser);
 
                 case ProtocolConstants.CommandLogout:
                     if (loggedInUser == null)
@@ -788,20 +838,214 @@ namespace Server
             }
             
             responseData = Encoding.UTF8.GetBytes(responseMessage);
-            return new Frame
+            
+            return (new Frame
             {
                 Header = ProtocolConstants.Response,
                 Command = frame.Command,
                 Data = responseData
-            };
+            }, loggedInUser);
         }
+        
+        private static async Task ListenForServerCommands()
+        {
+            Console.WriteLine("Escriba 'report' para generar el reporte diario, 'cancel' para detenerlo, o 'exit' para cerrar el servidor.");
+            while (isRunning)
+            {
+                string command = await Task.Run(() => Console.ReadLine()?.Trim().ToLower());
+
+                if (!isRunning) break; // Salir si el servidor se está deteniendo
+
+                switch (command)
+                {
+                    case "report":
+                        if (serverReportCts != null)
+                        {
+                            Console.WriteLine("Ya hay un reporte generándose.");
+                        }
+                        else
+                        {
+                            serverReportCts = new CancellationTokenSource();
+                            Console.WriteLine("Iniciando generación de reporte...");
+                            _ = GenerateAndPrintReportAsync(serverReportCts.Token);
+                        }
+                        break;
+
+                    case "cancel":
+                        if (serverReportCts != null)
+                        {
+                            Console.WriteLine("Enviando señal de cancelación...");
+                            serverReportCts.Cancel();
+                        }
+                        else
+                        {
+                            Console.WriteLine("No hay ningún reporte en ejecución para cancelar.");
+                        }
+                        break;
+
+                    case "exit":
+                        Console.WriteLine("Iniciando cierre del servidor...");
+                        isRunning = false;
+                        serverReportCts?.Cancel();
+                        try { serverSocket?.Close(); } catch { }
+                        break;
+
+                    default:
+                        if (!string.IsNullOrEmpty(command))
+                            Console.WriteLine($"Comando desconocido: '{command}'. Comandos válidos: report, cancel, exit.");
+                        break;
+                }
+            }
+        }
+        private static async Task GenerateAndPrintReportAsync(CancellationToken token)        {
+            try
+            {
+                string responseMessage = null;
+                
+                List<OnlineClass> todayClasses = classRepo.GetAll().Where(c => c.StartDate.Date == DateTimeOffset.Now.Date).ToList();
+            
+                if (todayClasses.Count == 0)
+                {
+                    Console.WriteLine("\n--- Reporte del Día ---");
+                    Console.WriteLine("No hay clases programadas para hoy.");
+                    Console.WriteLine("-----------------------\n");
+                    return;
+                }
+                
+                token.ThrowIfCancellationRequested();
+
+                if (todayClasses.Count == 0)
+                {
+                    Console.WriteLine("\n--- Reporte del Día ---");
+                    Console.WriteLine("No hay clases programadas para hoy.");
+                    Console.WriteLine("-----------------------\n");
+                    return; // Termina
+                }
+
+                int totalClasses = todayClasses.Count;
+                double avgDuration = todayClasses.Average(c => c.Duration);
+        
+                int totalInscriptions = 0;
+                foreach (var c in todayClasses)
+                {
+                    totalInscriptions += inscriptionRepo.GetActiveClassByClassId(c.Id).Count;
+                }
+                double avgInscriptions = (totalClasses > 0) ? (double)totalInscriptions / totalClasses : 0;
+                
+                token.ThrowIfCancellationRequested();
+
+                List<OnlineClass> classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();            int totalImages = classesWithImages.Count;
+                long totalSize = 0;
+                double avgSize = 0;
+                
+                if (totalImages > 0)
+                {
+                    var sizeTasks = new List<Task<long>>();
+                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+
+                    foreach (var c in classesWithImages)
+                    {
+                        sizeTasks.Add(GetFileSizeAsync(Path.Combine(imagesPath, c.Image), token));                
+                    }
+
+                    token.ThrowIfCancellationRequested();
+
+                    long[] sizes = await Task.WhenAll(sizeTasks);
+
+                    totalSize = sizes.Sum();
+                    avgSize = (double)totalSize / totalImages;
+                }
+                
+                token.ThrowIfCancellationRequested();
+                
+                Console.WriteLine("OK|--- Reporte de Clases del Día ---");
+                Console.WriteLine($"Total de Clases: {totalClasses}");
+                Console.WriteLine($"Duración Promedio: {avgDuration:F2} min");
+                Console.WriteLine($"Total de Inscriptos: {totalInscriptions}");
+                Console.WriteLine($"Promedio de Inscriptos: {avgInscriptions:F2}");
+                Console.WriteLine($"Clases con Portada: {totalImages}");
+                Console.WriteLine($"Tamaño Total de Portadas: {totalSize} bytes");
+                Console.WriteLine($"Tamaño Promedio de Portadas: {avgSize:F2} bytes");
+                Console.WriteLine("-------------------------------\n");
+                Console.WriteLine("Reporte generado con éxito.");
+                
+            }
+            catch (TaskCanceledException)
+            {
+                Console.WriteLine("\n*** La generación del reporte fue cancelada. ***\n");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"\n*** Error al generar el reporte: {ex.Message} ***\n");
+            }
+            finally
+            {
+                serverReportCts?.Dispose();
+                serverReportCts = null;
+                Console.Write("Ingrese comando (report, cancel, exit): ");
+            }
+        }
+        
+        private static async Task<long> GetFileSizeAsync(string filePath, CancellationToken cancellationToken)
+        {
+            await Task.Delay(3000, cancellationToken); // TODO just for testing purpose
+            
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            if (!File.Exists(filePath))
+            {
+                return 0;
+            }
+            return new FileInfo(filePath).Length;
+        }
+        
+        private static async Task ProcessAndSendReport(Frame frame, User loggedInUser, NetworkDataHelper networkDataHelper, Socket clientSocket)
+        {
+            var cts = new CancellationTokenSource();
+            
+            if (!activeReportTasks.TryAdd(clientSocket, cts))
+            {
+                try
+                {
+                    byte[] errorData = Encoding.UTF8.GetBytes("ERR|Ya tienes un reporte en progreso.");
+                    await networkDataHelper.Send(new Frame { Header = ProtocolConstants.Response, Command = frame.Command, Data = errorData });
+                }
+                catch (Exception ex) { Console.WriteLine($"Error al notificar al cliente (reporte duplicado): {ex.Message}"); }
+                return;
+            }
+
+            try
+            {
+                (var responseFrame, _) = await ProcessCommand(
+                    frame, loggedInUser, networkDataHelper, clientSocket, cts.Token);
+                
+                if (responseFrame != null)
+                    await networkDataHelper.Send(responseFrame);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Error en Tarea Reporte] {ex.Message}");
+                try
+                {
+                    byte[] errorData = Encoding.UTF8.GetBytes($"ERR|Error interno al generar reporte: {ex.Message}");
+                    await networkDataHelper.Send(new Frame { Header = ProtocolConstants.Response, Command = frame.Command, Data = errorData });
+                }
+                catch { }
+            }
+            finally
+            {
+                activeReportTasks.TryRemove(clientSocket, out _);
+                cts.Dispose();
+            }
+        }
+        
         private static void SeedData()
         {
             try
             {
                 Console.WriteLine("Seeding initial data...");
 
-                // Creación de Usuarios
+                // --- 1. Creación de Usuarios ---
                 var pau = new User("pau", "pau");
                 var teo = new User("teo", "teo");
                 var romi = new User("romi", "romi");
@@ -810,23 +1054,70 @@ namespace Server
                 userRepo.Add(romi);
                 Console.WriteLine("Users created: pau, teo, romi");
 
-                // Creación de Clases
-                // Creador para todas las clases es "pau"
-                var classPast = new OnlineClass("Clase 1", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
-                var classSoon = new OnlineClass("Clase 2", "Charla sobre IA", 5, DateTimeOffset.Now.AddDays(2), 120, pau);
-                var classFuture = new OnlineClass("Clase 3", "Fundamentos de computacion", 20, DateTimeOffset.Now.AddYears(1), 180, pau);
+                // --- 2. Creación de Clases (Generales) ---
+                var classPast = new OnlineClass("Clase 1 (Pasada)", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
+                var classSoon = new OnlineClass("Clase 2 (Próxima)", "Charla sobre IA", 5, DateTimeOffset.Now.AddDays(2), 120, pau);
+                var classFuture = new OnlineClass("Clase 3 (Futura)", "Fundamentos de computacion", 20, DateTimeOffset.Now.AddYears(1), 180, pau);
+                
                 classRepo.Add(classPast);
                 classRepo.Add(classSoon);
                 classRepo.Add(classFuture);
-                Console.WriteLine("Classes created.");
+                Console.WriteLine("General classes created (past, soon, future).");
+
+                // --- 3. Creación de Clases para el Reporte de HOY (Req. 4) ---
                 
-                Console.WriteLine("No inscriptions where created");
+                // Obtenemos fechas de hoy (ej. 10:00 AM y 2:00 PM)
+                DateTimeOffset todayMorning = new DateTimeOffset(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, 10, 0, 0, DateTimeOffset.Now.Offset);
+                DateTimeOffset todayAfternoon = todayMorning.AddHours(4); // 2:00 PM
+
+                // Clase de hoy #1 (con inscripciones, sin imagen)
+                var classToday1 = new OnlineClass("Taller de Docker (Hoy)", "Clase de hoy, sin portada", 10, todayMorning, 60, pau);
+                classRepo.Add(classToday1);
+
+                // Clase de hoy #2 (con inscripciones, con imagen)
+                var classToday2 = new OnlineClass("Taller de Redes (Hoy)", "Clase de hoy, con portada", 15, todayAfternoon, 90, pau);
+                classToday2.Image = "reporte_test_img.jpg"; // Asignamos un nombre de imagen
+                classRepo.Add(classToday2);
+
+                // Clase de hoy #3 (sin inscripciones, con imagen)
+                var classToday3 = new OnlineClass("Charla de C# (Hoy)", "Otra clase de hoy", 20, todayAfternoon.AddHours(2), 45, pau);
+                classToday3.Image = "reporte_test_img_2.jpg";
+                classRepo.Add(classToday3);
+                
+                Console.WriteLine("Classes for today's report created.");
+
+                // --- 4. Creación de Inscripciones (para clases de hoy y pasadas) ---
+                inscriptionRepo.Add(new Inscription(teo, classToday1));
+                inscriptionRepo.Add(new Inscription(romi, classToday1)); // 2 inscriptos
+                
+                inscriptionRepo.Add(new Inscription(teo, classToday2)); // 1 inscripto
+                
+                inscriptionRepo.Add(new Inscription(romi, classPast)); // 1 inscripto en una clase pasada
+                Console.WriteLine("Inscriptions for classes created.");
+
+                // --- 5. Creación de Archivos de Imagen Falsos (para el cálculo de tamaño) ---
+                try
+                {
+                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
+                    Directory.CreateDirectory(imagesPath); // Asegura que la carpeta exista
+
+                    string filePath1 = Path.Combine(imagesPath, "reporte_test_img.jpg");
+                    File.WriteAllText(filePath1, "Este es un archivo de prueba con un tamaño."); // Crea un archivo con contenido
+
+                    string filePath2 = Path.Combine(imagesPath, "reporte_test_img_2.jpg");
+                    File.WriteAllText(filePath2, "Este es un segundo archivo de prueba, un poco más grande que el primero.");
+                    
+                    Console.WriteLine("Dummy image files for report created in ServerImages.");
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Error creating dummy image files: {e.Message}");
+                }
 
                 Console.WriteLine("Data seeding finished successfully.");
             }
             catch (Exception e)
             {
-                // Este catch es por si se intenta agregar un usuario que ya existe, para que el servidor no se caiga.
                 Console.WriteLine($"Error during data seeding: {e.Message}");
             }
         }

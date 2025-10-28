@@ -13,39 +13,60 @@ namespace Client
         private enum AuthResult { LoginSuccess, Exit }
         private enum MenuStatus { Unknown, LogOut, Escape}
 
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             Console.WriteLine("Iniciando Cliente...");
 
-            SettingsManager settingsMgr = new SettingsManager();
+            string clientHostnameString = Environment.GetEnvironmentVariable(ClientConfig.ClientIpConfigKey) ?? "0.0.0.0";
+            Console.WriteLine($"client host: {clientHostnameString}");
 
-            // IP y puerto del cliente
-            IPAddress clientIp = IPAddress.Parse(settingsMgr.ReadSetting(ClientConfig.ClientIpConfigKey));
-            int clientPort = int.Parse(settingsMgr.ReadSetting(ClientConfig.ClientPortConfigKey));
+            IPAddress clientIp;
+            if (clientHostnameString == "0.0.0.0" || clientHostnameString == "client")
+            {
+                clientIp = IPAddress.Any;
+            }
+            else
+            {
+                IPAddress[] clientAddresses = Dns.GetHostAddresses(clientHostnameString);
+                clientIp = clientAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                           ?? throw new Exception($"Cannot resolve client hostname: {clientHostnameString}");
+            }
+
+            string clientPortString = Environment.GetEnvironmentVariable(ClientConfig.ClientPortConfigKey) ?? "0";
+            int clientPort = int.Parse(clientPortString);
             IPEndPoint localEndpoint = new IPEndPoint(clientIp, clientPort);
 
             Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             clientSocket.Bind(localEndpoint);
 
-            // IP y puerto del servidor
-            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
-            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.SeverPortConfigKey));
+            string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "127.0.0.1";
+            IPAddress[] serverAddresses = Dns.GetHostAddresses(serverHostnameString);
+            IPAddress? serverIp = serverAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
+            if (serverIp == null)
+            {
+                throw new Exception($"Cannot resolve server hostname: {serverHostnameString}");
+            }
+            Console.WriteLine($"Server IP {serverIp}");
+
+            string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.SeverPortConfigKey) ?? "5000";
+            int serverPort = int.Parse(serverPortString);
             IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
+
 
             try
             {
-                clientSocket.Connect(serverEndpoint);
+                await clientSocket.ConnectAsync(serverEndpoint);
                 Console.WriteLine("¡Conectado al servidor!");
                 _networkHelper = new NetworkDataHelper(clientSocket);
 
                 bool appIsRunning = true;
                 while (appIsRunning)
                 {
-                    AuthResult authResult = RunAuthMenu();
+                    AuthResult authResult = await RunAuthMenu();
 
                     if (authResult == AuthResult.LoginSuccess)
                     {
-                        var menuStatus = RunMainMenu();
+                        var menuStatus = await RunMainMenu();
 
                         if (menuStatus != MenuStatus.LogOut)
                         {
@@ -84,9 +105,8 @@ namespace Client
                 Console.ReadLine();
             }
         }
-
         
-        private static AuthResult RunAuthMenu()
+        private static async Task<AuthResult> RunAuthMenu()
         {
             while (true)
             {
@@ -134,7 +154,7 @@ namespace Client
 
                 if (requestFrame != null)
                 {
-                    Frame responseFrame = SendAndReceiveFrame(requestFrame);
+                    Frame responseFrame = await SendAndReceiveFrame(requestFrame);
                     string responseData = Encoding.UTF8.GetString(responseFrame.Data ?? new byte[0]);
 
                     if (requestFrame.Command == ProtocolConstants.CommandLogin && responseData.StartsWith("OK"))
@@ -150,7 +170,7 @@ namespace Client
             }
         }
         
-        private static MenuStatus RunMainMenu()
+        private static async Task<MenuStatus> RunMainMenu()
         {
             MenuStatus menuStatus = MenuStatus.Unknown;
             bool sessionRunning = true;
@@ -205,7 +225,7 @@ namespace Client
                             Command = ProtocolConstants.CommandCreateClass,
                             Data = Encoding.UTF8.GetBytes(payload)
                         };
-                        Frame classCreated = SendAndReceiveFrame(classFrame);
+                        Frame classCreated = await SendAndReceiveFrame(classFrame);
                         string classCreatedStr = Encoding.UTF8.GetString(classCreated.Data ?? new byte[0]).Trim();
 
                         int createdClassId = -1;
@@ -235,7 +255,7 @@ namespace Client
 
                         if (!string.IsNullOrEmpty(imagePath))
                         {
-                            bool ok = UploadImage(imagePath, createdClassId);
+                            bool ok = await UploadImage(imagePath, createdClassId);
                             if (!ok)
                             {
                                 Console.WriteLine("⚠️ La imagen no pudo subirse. La clase se creó igual sin portada.");
@@ -298,12 +318,12 @@ namespace Client
                             Command = ProtocolConstants.CommandModifyClass,
                             Data = Encoding.UTF8.GetBytes(modPayload)
                         };
-                        Frame modResponse = SendAndReceiveFrame(requestFrame);
+                        Frame modResponse = await SendAndReceiveFrame(requestFrame);
                         string modRespStr = Encoding.UTF8.GetString(modResponse.Data ?? new byte[0]);
                         ProcessSimpleResponse(modRespStr);
                         if (modRespStr.StartsWith("OK") && !string.IsNullOrEmpty(modImagePath))
                         {
-                            bool ok = UploadImage(modImagePath, int.Parse(modId));
+                            bool ok = await UploadImage(modImagePath, int.Parse(modId));
                             if (!ok)
                             {
                                 Console.WriteLine("La imagen no pudo subirse. La clase se creó igual sin portada.");
@@ -358,13 +378,13 @@ namespace Client
                             Command = ProtocolConstants.CommandLogout,
                             Data = null
                         };
-                        Frame response = SendAndReceiveFrame(requestFrame);
+                        Frame response = await SendAndReceiveFrame(requestFrame);
                         ProcessSimpleResponse(Encoding.UTF8.GetString(response.Data));
                         menuStatus = MenuStatus.LogOut;
                         sessionRunning = false;
                         continue;
                     case "10": // Salir de la Aplicación
-                        SendAndReceiveFrame(new Frame { Command = ProtocolConstants.CommandLogout, Header = ProtocolConstants.Request });
+                        await SendAndReceiveFrame(new Frame { Command = ProtocolConstants.CommandLogout, Header = ProtocolConstants.Request });
                         menuStatus = MenuStatus.Escape;
                         sessionRunning = false;
                         continue;
@@ -382,9 +402,9 @@ namespace Client
                                 Data = Encoding.UTF8.GetBytes(downloadId)
                             };
 
-                            _networkHelper.Send(downloadFrame);
+                            await _networkHelper.Send(downloadFrame);
 
-                            Frame metaFrame = _networkHelper.Receive();
+                            Frame metaFrame = await _networkHelper.Receive();
                             string metaStr = Encoding.UTF8.GetString(metaFrame.Data ?? new byte[0]);
                             if (!metaStr.StartsWith("OK|"))
                             {
@@ -392,7 +412,7 @@ namespace Client
                                 break;
                             }
 
-                            string[] parts = metaStr.Substring(3).Split('|'); // "OK|filename|filesize"
+                            string[] parts = metaStr.Substring(3).Split('|');
                             if (parts.Length < 2)
                             {
                                 Console.WriteLine("Error en metadata recibida.");
@@ -429,17 +449,17 @@ namespace Client
 
                                 if (!isLastPart)
                                 {
-                                    buffer = _networkHelper.Receive(ProtocolConstants.MaxFilePartSize);
+                                    buffer = await _networkHelper.Receive(ProtocolConstants.MaxFilePartSize);
                                     offset += ProtocolConstants.MaxFilePartSize;
                                 }
                                 else
                                 {
                                     long lastPartSize = fileSize - offset;
-                                    buffer = _networkHelper.Receive((int)lastPartSize);
+                                    buffer = await _networkHelper.Receive((int)lastPartSize);
                                     offset += lastPartSize;
                                 }
 
-                                fsh.Write(filePath, buffer);
+                                await fsh.Write(filePath, buffer);
                                 currentPart++;
                             }
 
@@ -454,8 +474,6 @@ namespace Client
                         break;
                     }
 
-                        
-
                     default:
                         Console.WriteLine("Opción no válida. Intente de nuevo.");
                         continue;
@@ -463,19 +481,19 @@ namespace Client
                 
                 if (requestFrame != null)
                 {
-                    Frame responseFrame = SendAndReceiveFrame(requestFrame);
+                    Frame responseFrame = await SendAndReceiveFrame(requestFrame);
                     ProcessFullResponse(responseFrame); 
                 }
             }
             return menuStatus;
         }
         
-        private static Frame SendAndReceiveFrame(Frame frame)
+        private static async Task<Frame> SendAndReceiveFrame(Frame frame)
         {
             try
             {
-                _networkHelper.Send(frame);
-                return _networkHelper.Receive();
+                await _networkHelper.Send(frame);
+                return await _networkHelper.Receive(); 
             }
             catch (Exception e)
             {
@@ -483,13 +501,12 @@ namespace Client
                 throw;
             }
         }
-
         
-        private static void SendFrame(Frame frame)
+        private static async Task SendFrame(Frame frame)
         {
             try
             {
-                _networkHelper.Send(frame);
+                await _networkHelper.Send(frame);
             }
             catch (Exception e)
             {
@@ -576,7 +593,7 @@ namespace Client
             }
         }
         
-        private static bool UploadImage(string imagePath, int classId)
+        private static async Task<bool> UploadImage(string imagePath, int classId)
         {
             try
             {
@@ -599,14 +616,14 @@ namespace Client
                     Command = ProtocolConstants.CommandUploadImage,
                     Data = Array.Empty<byte>()
                 };
-                SendFrame(enviarImagen);
+                await SendFrame(enviarImagen);
 
-                _networkHelper.Send(BitConverter.GetBytes(classId));
-                _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
-                _networkHelper.Send(fileNameBytes);
-                _networkHelper.Send(BitConverter.GetBytes(fileSize));
+                await _networkHelper.Send(BitConverter.GetBytes(classId));
+                await _networkHelper.Send(BitConverter.GetBytes(fileNameLength));
+                await _networkHelper.Send(fileNameBytes);
+                await _networkHelper.Send(BitConverter.GetBytes(fileSize));
 
-                Frame metaResponse = _networkHelper.Receive();
+                Frame metaResponse = await _networkHelper.Receive();
                 string metaRespStr = Encoding.UTF8.GetString(metaResponse.Data ?? Array.Empty<byte>());
                 ProcessSimpleResponse(metaRespStr);
 
@@ -627,22 +644,22 @@ namespace Client
 
                     if (!isLastPart)
                     {
-                        buffer = fsh.Read(imagePath, offset, ProtocolConstants.MaxFilePartSize);
+                        buffer = await fsh.Read(imagePath, offset, ProtocolConstants.MaxFilePartSize);
                         offset += ProtocolConstants.MaxFilePartSize;
                     }
                     else
                     {
                         long lastPartSize = fileSize - offset;
-                        buffer = fsh.Read(imagePath, offset, (int)lastPartSize);
+                        buffer = await fsh.Read(imagePath, offset, (int)lastPartSize);
                         offset += lastPartSize;
                     }
 
-                    _networkHelper.Send(buffer);
+                    await _networkHelper.Send(buffer);
                     Console.WriteLine($"Enviando segmento {currentPart}/{partCount}...");
                     currentPart++;
                 }
 
-                Frame imageResponse = _networkHelper.Receive();
+                Frame imageResponse = await _networkHelper.Receive();
                 string imageRespStr = Encoding.UTF8.GetString(imageResponse.Data ?? Array.Empty<byte>());
                 ProcessSimpleResponse(imageRespStr);
 

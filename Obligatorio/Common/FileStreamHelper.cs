@@ -1,49 +1,50 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.IO;
 using System.Threading.Tasks;
 
 namespace Common
 {
     public class FileStreamHelper
     {
-        public byte[] Read(string path, long offset, int length)
+        public async Task<byte[]> Read(string path, long offset, int length)
         {
             byte[] data = new byte[length];
 
-            using (FileStream fs = new FileStream(path, FileMode.Open))
+            using (FileStream fs = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 4096,
+                useAsync: true))
             {
                 fs.Position = offset;
                 int bytesRead = 0;
                 while (bytesRead < length)
                 {
-                    int read = fs.Read(data, bytesRead, length - bytesRead);
+                    int read = await fs.ReadAsync(data, bytesRead, length - bytesRead);
                     if (read == 0)
-                    {
                         throw new Exception("File could not be read");
-                    }
                     bytesRead += read;
                 }
             }
+
             return data;
         }
 
-        public void Write(string path, byte[] data)
+        public async Task Write(string path, byte[] data)
         {
-            if (File.Exists(path))
+            FileMode mode = File.Exists(path) ? FileMode.Append : FileMode.Create;
+
+            using (FileStream fs = new FileStream(
+                path,
+                mode,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 4096,
+                useAsync: true))
             {
-                using (FileStream fs = new FileStream(path, FileMode.Append))
-                {
-                    fs.Write(data, 0, data.Length);
-                }
-            }
-            else
-            {
-                using (FileStream fs = new FileStream(path, FileMode.Create))
-                {
-                    fs.Write(data, 0, data.Length);
-                }
+                await fs.WriteAsync(data, 0, data.Length);
             }
         }
     }
