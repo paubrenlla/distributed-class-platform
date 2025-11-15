@@ -26,6 +26,7 @@ namespace Server
         static async Task Main(string[] args)
         {
             SeedData();
+            await LogPublisher.InitAsync();
             Console.WriteLine("Server starting with preloaded data...");
             string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
             string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.SeverPortConfigKey) ?? "5000";
@@ -51,7 +52,7 @@ namespace Server
             {
                 Directory.CreateDirectory(receiveDirectory);
             }
-            Console.WriteLine($"🗂️ Carpeta de imágenes del servidor: {Path.GetFullPath(receiveDirectory)}");
+            Console.WriteLine($"Carpeta de imágenes del servidor: {Path.GetFullPath(receiveDirectory)}");
 
 
             serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -210,6 +211,7 @@ namespace Server
                         userRepo.Add(user);
                         
                         responseMessage = $"OK|Usuario '{parts[0]}' creado exitosamente.";
+                        _ = LogPublisher.Publish($"Usuario Creado {user.Username} ts={DateTimeOffset.UtcNow:o}");
                     }
                     catch (Exception ex)
                     {
@@ -234,6 +236,7 @@ namespace Server
                         {
                             loggedInUser = user;
                             responseMessage = $"OK|Bienvenido, {user.Username}!";
+                            _ = LogPublisher.Publish($"Usuario logeado {user.Username} ts={DateTimeOffset.UtcNow:o}");
                         }
                         else
                         {
@@ -598,7 +601,7 @@ namespace Server
                                     }
                                     catch (Exception ex) 
                                     {
-                                        Console.WriteLine($"⚠️ No se pudo eliminar la imagen '{classToDelete.Image}': {ex.Message}");
+                                        Console.WriteLine($"No se pudo eliminar la imagen '{classToDelete.Image}': {ex.Message}");
                                     }
                                 }
                             }

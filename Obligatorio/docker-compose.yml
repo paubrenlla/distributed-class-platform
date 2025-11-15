@@ -1,15 +1,47 @@
-﻿#version: "3.9"
+﻿# version: "3.9"
 
 services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # UI http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: app
+      RABBITMQ_DEFAULT_PASS: app
+    networks:
+      - obligatorio_default
+
+  logs-consumer:
+    build:
+      context: .
+      dockerfile: LogsConsumer/Dockerfile
+    container_name: logs-consumer
+    environment:
+      - RABBIT_HOST=rabbitmq
+      - RABBIT_USER=app
+      - RABBIT_PASS=app
+    depends_on:
+      - rabbitmq
+    networks:
+      - obligatorio_default
+    stdin_open: true     # <-- mantiene STDIN abierto
+    tty: true
+
   server:
     build:
-      context: . 
+      context: .
       dockerfile: Server/Dockerfile
     container_name: servidor
     environment:
       - SERVER_HOSTNAME=0.0.0.0
       - SERVER_PORT=5000
       - RECEIVE_DIRECTORY=/app/publish/ServerImages
+      # RabbitMQ (para LogPublisher)
+      - RABBIT_HOST=rabbitmq
+      - RABBIT_USER=app
+      - RABBIT_PASS=app
     stdin_open: true
     tty: true
     volumes:
@@ -18,6 +50,8 @@ services:
       - "5000:5000"
     networks:
       - obligatorio_default
+    depends_on:
+      - rabbitmq
 
   cliente:
     build:
@@ -29,6 +63,7 @@ services:
       - SERVER_PORT=5000
       - CLIENT_HOSTNAME=client
       - CLIENT_PORT=0
+      # (el cliente no usa RabbitMQ por ahora)
     stdin_open: true
     tty: true
     networks:
@@ -37,6 +72,20 @@ services:
       - server
     volumes:
       - ./ClienteImages:/app/ClienteImages
+
+# (opcional) consumer de logs simple si lo agregas:
+#  logs-consumer:
+#    build:
+#      context: .
+#      dockerfile: LogsConsumer/Dockerfile
+#    environment:
+#      - RABBIT_HOST=rabbitmq
+#      - RABBIT_USER=app
+#      - RABBIT_PASS=app
+#    depends_on:
+#      - rabbitmq
+#    networks:
+#      - obligatorio_default
 
 networks:
   obligatorio_default:
