@@ -12,6 +12,11 @@ services:
       RABBITMQ_DEFAULT_PASS: app
     networks:
       - obligatorio_default
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
 
   logs-consumer:
     build:
@@ -23,11 +28,14 @@ services:
       - RABBIT_USER=app
       - RABBIT_PASS=app
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
     networks:
       - obligatorio_default
     stdin_open: true     # <-- mantiene STDIN abierto
     tty: true
+    ports:
+      - "8081:8080"
 
   server:
     build:
@@ -51,7 +59,8 @@ services:
     networks:
       - obligatorio_default
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
 
   cliente:
     build:

@@ -1,6 +1,8 @@
 ﻿using System.Text;
 using System.Threading;
 using RabbitMQ.Client;
+using Common.DTOs;
+using Newtonsoft.Json;
 
 public static class LogPublisher
 {
@@ -30,14 +32,16 @@ public static class LogPublisher
         );
     }
 
-    public static async Task Publish(string message)
+    public static async Task Publish(LogMessageDTO messageDto)
     {
         if (_ch is null) return;
 
-        var body = Encoding.UTF8.GetBytes(message);
+        string jsonMessage = JsonConvert.SerializeObject(messageDto);
+        var body = Encoding.UTF8.GetBytes(jsonMessage);
+        
         var props = new BasicProperties
         {
-            DeliveryMode = DeliveryModes.Persistent // en vez de 2
+            DeliveryMode = DeliveryModes.Persistent
         };
         
         await _pubLock.WaitAsync();
