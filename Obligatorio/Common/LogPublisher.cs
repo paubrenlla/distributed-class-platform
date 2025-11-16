@@ -32,11 +32,11 @@ public static class LogPublisher
         );
     }
 
-    public static async Task Publish(LogMessage message)
+    public static async Task Publish(LogMessageDTO messageDto)
     {
         if (_ch is null) return;
 
-        string jsonMessage = JsonConvert.SerializeObject(message);
+        string jsonMessage = JsonConvert.SerializeObject(messageDto);
         var body = Encoding.UTF8.GetBytes(jsonMessage);
         
         var props = new BasicProperties

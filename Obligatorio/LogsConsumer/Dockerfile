@@ -2,19 +2,19 @@
 
 WORKDIR /app
 
-# Copiamos sólo el csproj y restauramos
+# 1. Copia AMBOS archivos .csproj para restaurar dependencias
 COPY LogsConsumer/LogsConsumer.csproj ./LogsConsumer/
+COPY Common/Common.csproj ./Common/
+
+# 2. Restaura las dependencias de LogsConsumer (que restaurará Common)
 RUN dotnet restore ./LogsConsumer/LogsConsumer.csproj
 
-# Copiamos el resto del código
+# 3. Copia AMBOS directorios de código fuente
 COPY LogsConsumer/. ./LogsConsumer/
+COPY Common/. ./Common/
 
-# Publicamos
+# 4. Publica
 RUN dotnet publish ./LogsConsumer/LogsConsumer.csproj -c Release -o /app/publish
 
-# Vars por defecto para apuntar al broker del compose
-ENV RABBIT_HOST=rabbitmq
-ENV RABBIT_USER=app
-ENV RABBIT_PASS=app
-
+# 5. Define el punto de entrada
 ENTRYPOINT ["dotnet", "/app/publish/LogsConsumer.dll"]

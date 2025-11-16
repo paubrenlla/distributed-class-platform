@@ -213,7 +213,7 @@ namespace Server
                         userRepo.Add(user);
                         responseMessage = $"OK|Usuario '{requestDto.Username}' creado exitosamente.";
                         
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Info",
                             Username = requestDto.Username, // El usuario nuevo
@@ -225,7 +225,7 @@ namespace Server
                     {
                         responseMessage = $"ERR|{ex.Message}";
                         
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Error",
                             Username = requestDto?.Username ?? "desconocido",
@@ -251,7 +251,7 @@ namespace Server
                         {
                             loggedInUser = user;
                             responseMessage = $"OK|Bienvenido, {user.Username}!";
-                            await LogPublisher.Publish(new LogMessage
+                            await LogPublisher.Publish(new LogMessageDTO
                             {
                                 Level = "Info",
                                 Username = user.Username,
@@ -262,7 +262,7 @@ namespace Server
                         else
                         {
                             responseMessage = "ERR|Usuario o contraseña incorrectos.";
-                            await LogPublisher.Publish(new LogMessage
+                            await LogPublisher.Publish(new LogMessageDTO
                             {
                                 Level = "Warning",
                                 Username = request.Username,
@@ -323,7 +323,7 @@ namespace Server
                         classRepo.Add(newClass);
                         responseMessage = $"OK|{newClass.Id}";
                         
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Info",
                             Username = loggedInUser.Username,
@@ -334,7 +334,7 @@ namespace Server
                     catch (FormatException)
                     {
                         responseMessage = "ERR|El formato de la fecha es incorrecto. Use AAAA-MM-DD HH:MM";
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Error",
                             Username = loggedInUser?.Username ?? "desconocido",
@@ -345,7 +345,7 @@ namespace Server
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Error",
                             Username = loggedInUser?.Username ?? "desconocido",
@@ -382,7 +382,7 @@ namespace Server
                         inscriptionRepo.Add(newInscription);
 
                         responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Info",
                             Username = loggedInUser.Username,
@@ -394,7 +394,7 @@ namespace Server
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Warning",
                             Username = loggedInUser.Username,
@@ -430,7 +430,7 @@ namespace Server
         
                         responseMessage = $"OK|Tu inscripción a la clase '{inscription.Class.Name}' ha sido cancelada.";
                         
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Info",
                             Username = loggedInUser.Username,
@@ -442,7 +442,7 @@ namespace Server
                     {
                         responseMessage = $"ERR|{ex.Message}";
                         
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Warning",
                             Username = loggedInUser.Username,
@@ -702,7 +702,7 @@ namespace Server
 
                             responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
                             
-                            await LogPublisher.Publish(new LogMessage
+                            await LogPublisher.Publish(new LogMessageDTO
                             {
                                 Level = "Info",
                                 Username = loggedInUser.Username,
@@ -719,7 +719,7 @@ namespace Server
                     {
                         responseMessage = $"ERR|{ex.Message}";
                         
-                        await LogPublisher.Publish(new LogMessage
+                        await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Warning",
                             Username = loggedInUser.Username,

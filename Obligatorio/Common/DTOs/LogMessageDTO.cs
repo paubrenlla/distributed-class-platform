@@ -1,6 +1,6 @@
 namespace Common.DTOs;
 
-public class LogMessage
+public class LogMessageDTO
 {
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     public string Level { get; set; } // "Info", "Error", "Warning"
