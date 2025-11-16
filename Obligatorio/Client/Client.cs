@@ -231,8 +231,8 @@ namespace Client
                         {
                             Name = name,
                             Description = desc,
-                            MaxCapacity = int.Parse(capacity), // El DTO usa int
-                            Duration = int.Parse(duration),   // El DTO usa int
+                            MaxCapacity = int.Parse(capacity), 
+                            Duration = int.Parse(duration),
                             StartDate = startDateStr
                         };
                         string jsonPayloadClass = JsonConvert.SerializeObject(createClassDto);

@@ -1,8 +1,7 @@
-// Asegúrate de tener todos estos usings
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using RabbitMQ.Client; // <-- Define IConnection y IChannel
-using RabbitMQ.Client.Events; // <-- Define AsyncEventingBasicConsumer
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events; 
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,15 +14,14 @@ namespace LogsConsumer
     public class RabbitMQConsumerService : BackgroundService
     {
         private IConnection? _connection;
-        private IChannel? _channel; // <-- CORRECCIÓN: IModel ahora es IChannel
-        private readonly string _queueName = "task_queue"; // Coincide con tu LogPublisher
+        private IChannel? _channel; 
+        private readonly string _queueName = "task_queue"; 
         private readonly LogStorageService _logStorage;
         private readonly ILogger<RabbitMQConsumerService> _logger;
         private readonly string _rabbitMqHost;
         private readonly string _rabbitMqUser;
         private readonly string _rabbitMqPass;
 
-        // 1. El constructor sólo guarda dependencias
         public RabbitMQConsumerService(LogStorageService logStorage, ILogger<RabbitMQConsumerService> logger)
         {
             _logStorage = logStorage;
@@ -33,8 +31,6 @@ namespace LogsConsumer
             _rabbitMqUser = Environment.GetEnvironmentVariable("RABBIT_USER") ?? "guest";
             _rabbitMqPass = Environment.GetEnvironmentVariable("RABBIT_PASS") ?? "guest";
         }
-
-        // 2. StartAsync para la conexión asincrónica
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
             try
@@ -48,7 +44,6 @@ namespace LogsConsumer
 
                 _connection = await factory.CreateConnectionAsync(cancellationToken);
 
-                // ✅ Crear el canal correctamente según tu versión del paquete
                 _channel = await _connection.CreateChannelAsync();
 
                 await _channel.QueueDeclareAsync(
@@ -69,10 +64,6 @@ namespace LogsConsumer
 
             await base.StartAsync(cancellationToken);
         }
-
-
-
-        // 3. ExecuteAsync configura el consumidor asincrónico
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             if (_channel == null)
@@ -81,10 +72,8 @@ namespace LogsConsumer
                 return;
             }
 
-            // 4. Usamos AsyncEventingBasicConsumer
             var consumer = new AsyncEventingBasicConsumer(_channel);
 
-            // 5. El handler es 'async Task'
             consumer.ReceivedAsync += async (model, ea) =>
             {
                 try
@@ -117,7 +106,6 @@ namespace LogsConsumer
             }
         }
 
-        // 4. StopAsync para cerrar recursos asincrónicamente
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Cerrando conexión de RabbitMQ...");
