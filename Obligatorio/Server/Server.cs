@@ -211,7 +211,6 @@ namespace Server
         
                         userRepo.Add(user);
                         responseMessage = $"OK|Usuario '{request.Username}' creado exitosamente.";
-                        _ = LogPublisher.Publish($"Usuario Creado {user.Username} ts={DateTimeOffset.UtcNow:o}");
                     }
                     catch (Exception ex)
                     {
@@ -235,10 +234,24 @@ namespace Server
                         {
                             loggedInUser = user;
                             responseMessage = $"OK|Bienvenido, {user.Username}!";
+                            await LogPublisher.Publish(new LogMessage
+                            {
+                                Level = "Info",
+                                Username = user.Username,
+                                Action = "UserLogin",
+                                Message = $"Usuario '{user.Username}' inició sesión."
+                            });
                         }
                         else
                         {
                             responseMessage = "ERR|Usuario o contraseña incorrectos.";
+                            await LogPublisher.Publish(new LogMessage
+                            {
+                                Level = "Warning",
+                                Username = request.Username,
+                                Action = "UserLoginFailed",
+                                Message = "Intento de login fallido."
+                            });
                         }
                     }
                     catch(Exception ex)
