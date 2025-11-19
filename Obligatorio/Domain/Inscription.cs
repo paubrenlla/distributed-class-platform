@@ -17,14 +17,17 @@ namespace Domain
         public OnlineClass Class { get; private set; }
         public DateTimeOffset EnrollmentDate { get; private set; }
         public InscriptionStatus Status { get; private set; }
+        public string? WebhookUrl { get; private set; }
+        public bool NotificationSent { get; set; } = false;
 
-        public Inscription(User user, OnlineClass onlineClass)
+        public Inscription(User user, OnlineClass onlineClass, string? webhookUrl = null)
         {
             Id = _nextId++;
             User = user ?? throw new ArgumentNullException(nameof(user));
             Class = onlineClass ?? throw new ArgumentNullException(nameof(onlineClass));
             EnrollmentDate = DateTimeOffset.Now;
             Status = InscriptionStatus.Active;
+            WebhookUrl = webhookUrl;
         }
 
         public void Cancel()
