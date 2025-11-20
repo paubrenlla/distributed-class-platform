@@ -8,6 +8,7 @@ using Repository;
 using Domain;
 using Newtonsoft.Json;
 using Common.DTOs;
+using Server.Services;
 
 namespace Server
 {
@@ -40,9 +41,13 @@ namespace Server
             }
             else
             {
-                IPAddress[] addresses = Dns.GetHostAddresses(serverHostnameString);
-                serverIp = addresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
-                           ?? throw new Exception($"Cannot resolve hostname: {serverHostnameString}");
+                try {
+                    IPAddress[] serverAddresses = Dns.GetHostAddresses(serverHostnameString);
+                    serverIp = serverAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork) 
+                               ?? IPAddress.Any;
+                } catch {
+                    serverIp = IPAddress.Any;
+                }
             }
 
             int serverPort = int.Parse(serverPortString);
@@ -62,18 +67,31 @@ namespace Server
             serverSocket.Listen(10);
             Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}");
             Console.WriteLine("Presiona Ctrl+C para cerrar (en Docker, se detiene con docker stop)");
+            
+            CancellationTokenSource globalCts = new CancellationTokenSource();
+            var webhookService = new WebhookNotificationService(inscriptionRepo);
 
             Task acceptClientsTask = AcceptClients();
             
             Task consoleListenerTask = ListenForServerCommands();
             
-            await Task.WhenAny(acceptClientsTask, consoleListenerTask);
+            Task webhookTask = Task.Run(() => webhookService.StartAsync(globalCts.Token));
             
+            await Task.WhenAny(acceptClientsTask, consoleListenerTask, webhookTask);
+            
+            // CIERRE DEL SERVIDOR
+            Console.WriteLine("Iniciando apagado...");
+    
             isRunning = false;
-            serverReportCts?.Cancel();
+    
+            globalCts.Cancel(); 
+    
+            serverReportCts?.Cancel(); 
+
             Console.WriteLine("Cerrando sockets...");
-            CloseAllClientSockets(); 
+            CloseAllClientSockets();
             try { serverSocket?.Close(); } catch { }
+    
             Console.WriteLine("Servidor detenido.");
         }
 
@@ -367,6 +385,7 @@ namespace Server
                         string jsonPayload = Encoding.UTF8.GetString(frame.Data);
                         subscribeRequest = JsonConvert.DeserializeObject<ClassIdRequestDTO>(jsonPayload);
                         int classId = subscribeRequest.ClassId;
+                        string? webhookUrl = subscribeRequest.WebhookUrl;
 
                         var classToJoin = classRepo.GetById(classId);
                         if (classToJoin == null) throw new Exception("La clase no existe.");
@@ -378,10 +397,10 @@ namespace Server
                         if (activeInscriptions.Count >= classToJoin.MaxCapacity)
                             throw new Exception("La clase no tiene cupos disponibles.");
 
-                        var newInscription = new Inscription(loggedInUser, classToJoin);
+                        var newInscription = new Inscription(loggedInUser, classToJoin, webhookUrl);
                         inscriptionRepo.Add(newInscription);
 
-                        responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";
+                        responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";                        
                         await LogPublisher.Publish(new LogMessageDTO
                         {
                             Level = "Info",
@@ -1047,7 +1066,8 @@ namespace Server
                 
                 token.ThrowIfCancellationRequested();
 
-                List<OnlineClass> classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();            int totalImages = classesWithImages.Count;
+                List<OnlineClass> classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();            
+                int totalImages = classesWithImages.Count;
                 long totalSize = 0;
                 double avgSize = 0;
                 
@@ -1226,6 +1246,23 @@ namespace Server
                 {
                     Console.WriteLine($"Error creating dummy image files: {e.Message}");
                 }
+                
+                var classWebhook = new OnlineClass(
+                    "Clase Webhook Test", 
+                    "Prueba automática de notificación", 
+                    5, 
+                    DateTimeOffset.Now.AddSeconds(60),
+                    30, 
+                    pau
+                );
+                classRepo.Add(classWebhook);
+
+                string miWebhookUrl = "https://webhook.site/e873d2f0-e892-43c6-8f59-306ab7b6073d"; 
+        
+                var inscriptionWebhook = new Inscription(teo, classWebhook, miWebhookUrl);
+                inscriptionRepo.Add(inscriptionWebhook);
+
+                Console.WriteLine($"[Seed] Creada clase '{classWebhook.Name}' que empieza en 60s para probar Webhook.");
 
                 Console.WriteLine("Data seeding finished successfully.");
             }
