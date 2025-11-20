@@ -1,12 +1,45 @@
 ﻿# version: "3.9"
 
 services:
+  authgrpc:
+    build:
+      context: .
+      dockerfile: AuthGrpc/Dockerfile
+    container_name: authgrpc
+    ports:
+      - "5191:5191"
+    networks: [ obligatorio_default ]
+
+  chatserver:
+    build:
+      context: .
+      dockerfile: ChatServer/Dockerfile
+    container_name: chatserver
+    environment:
+      - AUTH_GRPC_URL=http://authgrpc:5191
+    depends_on:
+      - authgrpc
+    ports:
+      - "8080:8080"
+    networks: [ obligatorio_default ]
+
+  chatclient:
+    build:
+      context: .
+      dockerfile: ChatClient/Dockerfile
+    container_name: chatclient
+    environment:
+      - CHAT_WS_URL=ws://chatserver:8080/ws
+    depends_on:
+      - chatserver
+    networks: [ obligatorio_default ]
+      
   rabbitmq:
     image: rabbitmq:4-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"   # AMQP
-      - "15672:15672" # UI http://localhost:15672
+      - "5672:5672"
+      - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: app
       RABBITMQ_DEFAULT_PASS: app
@@ -32,7 +65,7 @@ services:
         condition: service_healthy
     networks:
       - obligatorio_default
-    stdin_open: true     # <-- mantiene STDIN abierto
+    stdin_open: true
     tty: true
     ports:
       - "8081:8080"
@@ -46,7 +79,6 @@ services:
       - SERVER_HOSTNAME=0.0.0.0
       - SERVER_PORT=5000
       - RECEIVE_DIRECTORY=/app/publish/ServerImages
-      # RabbitMQ (para LogPublisher)
       - RABBIT_HOST=rabbitmq
       - RABBIT_USER=app
       - RABBIT_PASS=app
@@ -72,7 +104,6 @@ services:
       - SERVER_PORT=5000
       - CLIENT_HOSTNAME=client
       - CLIENT_PORT=0
-      # (el cliente no usa RabbitMQ por ahora)
     stdin_open: true
     tty: true
     networks:
@@ -81,20 +112,6 @@ services:
       - server
     volumes:
       - ./ClienteImages:/app/ClienteImages
-
-# (opcional) consumer de logs simple si lo agregas:
-#  logs-consumer:
-#    build:
-#      context: .
-#      dockerfile: LogsConsumer/Dockerfile
-#    environment:
-#      - RABBIT_HOST=rabbitmq
-#      - RABBIT_USER=app
-#      - RABBIT_PASS=app
-#    depends_on:
-#      - rabbitmq
-#    networks:
-#      - obligatorio_default
 
 networks:
   obligatorio_default:

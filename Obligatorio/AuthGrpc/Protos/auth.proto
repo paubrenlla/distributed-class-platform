@@ -1,0 +1,28 @@
+﻿syntax = "proto3";
+option csharp_namespace = "AuthGrpc";
+
+package auth;
+
+service Auth {
+  rpc ValidateUser (ValidateUserRequest) returns (ValidateUserResponse);
+  rpc ValidateClassLink (ValidateClassLinkRequest) returns (ValidateClassLinkResponse);
+}
+
+message ValidateUserRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message ValidateUserResponse {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message ValidateClassLinkRequest {
+  string link = 1;
+}
+
+message ValidateClassLinkResponse {
+  bool ok = 1;
+  string reason = 2;
+}
