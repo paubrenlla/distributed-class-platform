@@ -31,7 +31,7 @@ namespace Client
             {
                 IPAddress[] clientAddresses = Dns.GetHostAddresses(clientHostnameString);
                 clientIp = clientAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
-                           ?? throw new Exception($"Cannot resolve client hostname: {clientHostnameString}");
+                    ?? throw new Exception($"Cannot resolve client hostname: {clientHostnameString}");
             }
 
             string clientPortString = Environment.GetEnvironmentVariable(ClientConfig.ClientPortConfigKey) ?? "0";
@@ -284,8 +284,17 @@ namespace Client
                     case "3": //Inscribirse a una clase
                         Console.Write("Ingresa el ID de la clase a la que quieres inscribirte: ");
                         string classId = Console.ReadLine();
-    
-                        var subscribeDto = new ClassIdRequestDTO { ClassId = int.Parse(classId) };
+
+                        Console.Write("Ingresa URL para Webhook (opcional - enter para omitir): ");
+                        string webhookUrl = Console.ReadLine();
+                        if (string.IsNullOrWhiteSpace(webhookUrl)) webhookUrl = null;
+
+                        var subscribeDto = new SubscribeClassRequestDTO 
+                        { 
+                            ClassId = int.Parse(classId), 
+                            WebhookUrl = webhookUrl 
+                        };
+
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
