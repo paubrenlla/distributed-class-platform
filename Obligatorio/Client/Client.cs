@@ -270,6 +270,8 @@ namespace Client
                             requestFrame = null;
                             break;
                         }
+                        
+                        Console.WriteLine($"Clase creada con éxito. ID: {createdClassId}");
 
                         if (!string.IsNullOrEmpty(imagePath))
                         {
