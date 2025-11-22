@@ -125,5 +125,20 @@ namespace Repository
                 _semaphore.Release();
             }
         }
+
+        public OnlineClass GetByLink(string dtoLink)
+        {
+            _semaphore.Wait();
+            try
+            {
+                var clase = _clases.FirstOrDefault(c => c.Link == dtoLink);
+                if (clase == null) throw new InvalidOperationException("Clase no encontrada");
+                return clase;
+            }
+            finally
+            {
+                _semaphore.Release();
+            }
+        }
     }
 }
