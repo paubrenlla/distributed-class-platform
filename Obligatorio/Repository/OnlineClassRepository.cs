@@ -83,7 +83,7 @@ namespace Repository
             _semaphore.Wait();
             try
             {
-                var clase = GetById(id);
+                var clase = _clases.FirstOrDefault(c => c.Id == id);
                 if (clase == null)
                     throw new InvalidOperationException("Clase no encontrada");
 
