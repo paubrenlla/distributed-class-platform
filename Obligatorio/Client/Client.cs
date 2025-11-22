@@ -227,60 +227,97 @@ namespace Client
                         Console.Write("Ruta de la imagen de la clase (dejar vacío si no se quiere ingresar imagen): ");
                         string imagePath = Console.ReadLine();
 
-                        var createClassDto = new CreateClassRequestDTO
+                        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(desc) || string.IsNullOrWhiteSpace(startDateStr))
                         {
-                            Name = name,
-                            Description = desc,
-                            MaxCapacity = int.Parse(capacity), 
-                            Duration = int.Parse(duration),
-                            StartDate = startDateStr
-                        };
-                        string jsonPayloadClass = JsonConvert.SerializeObject(createClassDto);
-                        Frame classFrame = new Frame
-                        {
-                            Header = ProtocolConstants.Request,
-                            Command = ProtocolConstants.CommandCreateClass,
-                            Data = Encoding.UTF8.GetBytes(jsonPayloadClass)
-                        };
-                        
-                        Frame classCreated = await SendAndReceiveFrame(classFrame);
-                        string classCreatedStr = Encoding.UTF8.GetString(classCreated.Data ?? new byte[0]).Trim();
-
-                        int createdClassId = -1;
-                        if (classCreatedStr.StartsWith("OK|"))
-                        {
-                            var p = classCreatedStr.Split('|', 2);
-                            if (int.TryParse(p.Length > 1 ? p[1].Trim() : "", out int tmpId1))
-                                createdClassId = tmpId1;
-                            else // lo hacemos con linq por las dudas por si no llega a agarrar la id
-                            {
-                                
-                                var digits = new string((p.Length > 1 ? p[1] : "").Where(ch => char.IsDigit(ch)).ToArray());
-                                int.TryParse(digits, out createdClassId);
-                            }
-                        }
-                        else
-                        {
-                            int.TryParse(classCreatedStr, out createdClassId);
-                        }
-
-                        if (createdClassId <= 0)
-                        {
-                            Console.WriteLine("No se pudo obtener el ID de la clase creada. Se omitirá la subida de imagen.");
+                            Console.WriteLine("Error: Todos los campos de texto son obligatorios.");
                             requestFrame = null;
                             break;
                         }
 
-                        if (!string.IsNullOrEmpty(imagePath))
+                        if (!int.TryParse(capacity, out int maxCapacity) || maxCapacity <= 0)
                         {
-                            bool ok = await UploadImage(imagePath, createdClassId);
-                            if (!ok)
+                            Console.WriteLine("Error: El cupo máximo debe ser un número entero positivo.");
+                            requestFrame = null;
+                            break;
+                        }
+
+                        if (!int.TryParse(duration, out int durationMinutes) || durationMinutes <= 0)
+                        {
+                            Console.WriteLine("Error: La duración debe ser un número entero positivo.");
+                            requestFrame = null;
+                            break;
+                        }
+
+                        if (!DateTime.TryParse(startDateStr, out DateTime parsedDate))
+                        {
+                            Console.WriteLine("Error: La fecha debe tener el formato válido (AAAA-MM-DD HH:MM).");
+                            requestFrame = null;
+                            break;
+                        }
+
+                        try 
+                        {
+                            var createClassDto = new CreateClassRequestDTO
                             {
-                                Console.WriteLine("⚠️ La imagen no pudo subirse. La clase se creó igual sin portada.");
+                                Name = name,
+                                Description = desc,
+                                MaxCapacity = maxCapacity, 
+                                Duration = durationMinutes,
+                                StartDate = startDateStr
+                            };
+                            string jsonPayloadClass = JsonConvert.SerializeObject(createClassDto);
+                            Frame classFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandCreateClass,
+                                Data = Encoding.UTF8.GetBytes(jsonPayloadClass)
+                            };
+                            
+                            Frame classCreated = await SendAndReceiveFrame(classFrame);
+                            string classCreatedStr = Encoding.UTF8.GetString(classCreated.Data ?? new byte[0]).Trim();
+
+                            int createdClassId = -1;
+                            if (classCreatedStr.StartsWith("OK|"))
+                            {
+                                var p = classCreatedStr.Split('|', 2);
+                                if (int.TryParse(p.Length > 1 ? p[1].Trim() : "", out int tmpId1))
+                                    createdClassId = tmpId1;
+                                else 
+                                {
+                                    var digits = new string((p.Length > 1 ? p[1] : "").Where(ch => char.IsDigit(ch)).ToArray());
+                                    int.TryParse(digits, out createdClassId);
+                                }
                             }
+                            else
+                            {
+                                int.TryParse(classCreatedStr, out createdClassId);
+                            }
+
+                            if (createdClassId <= 0)
+                            {
+                                Console.WriteLine("No se pudo obtener el ID de la clase creada. Se omitirá la subida de imagen.");
+                                requestFrame = null;
+                                break;
+                            }
+                            
+                            Console.WriteLine($"Clase creada con éxito. ID: {createdClassId}");
+
+                            if (!string.IsNullOrEmpty(imagePath))
+                            {
+                                bool ok = await UploadImage(imagePath, createdClassId);
+                                if (!ok)
+                                {
+                                    Console.WriteLine("La imagen no pudo subirse. La clase se creó igual sin portada.");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error al crear la clase: {ex.Message}");
                         }
                         requestFrame = null; // Para evitar que se vuelva a enviar al final del while
                         break;
+
                     case "3": //Inscribirse a una clase
                         Console.Write("Ingresa el ID de la clase a la que quieres inscribirte: ");
                         string classId = Console.ReadLine();
