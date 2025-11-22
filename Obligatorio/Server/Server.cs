@@ -28,8 +28,8 @@ namespace Server
         
         static async Task Main(string[] args)
         {
-            SeedData();
             await LogPublisher.InitAsync();
+            SeedData();
             Console.WriteLine("Server starting with preloaded data...");
             string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
             string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.SeverPortConfigKey) ?? "5000";
@@ -1258,8 +1258,7 @@ namespace Server
             }
         }
         
-        private static void SeedData()
-        {
+        private static async Task SeedData()        {
             try
             {
                 Console.WriteLine("Seeding initial data...");
@@ -1272,6 +1271,13 @@ namespace Server
                 userRepo.Add(teo);
                 userRepo.Add(romi);
                 Console.WriteLine("Users created: pau, teo, romi");
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Info",
+                    Username = "System", // Usuario "Sistema"
+                    Action = "SeedData",
+                    Message = "Usuarios iniciales (pau, teo, romi) creados correctamente."
+                });
 
                 // --- 2. Creación de Clases (Generales) ---
                 var classPast = new OnlineClass("Clase 1 (Pasada)", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
@@ -1304,6 +1310,14 @@ namespace Server
                 classRepo.Add(classToday3);
                 
                 Console.WriteLine("Classes for today's report created.");
+                
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Info",
+                    Username = "System",
+                    Action = "SeedData",
+                    Message = "Clases de prueba iniciales creadas."
+                });
 
                 // --- 4. Creación de Inscripciones (para clases de hoy y pasadas) ---
                 inscriptionRepo.Add(new Inscription(teo, classToday1));
@@ -1313,6 +1327,14 @@ namespace Server
                 
                 inscriptionRepo.Add(new Inscription(romi, classPast)); // 1 inscripto en una clase pasada
                 Console.WriteLine("Inscriptions for classes created.");
+                
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Info",
+                    Username = "System",
+                    Action = "SeedData",
+                    Message = "Inscripciones a clases de prueba iniciales creadas."
+                });
 
                 // --- 5. Creación de Archivos de Imagen Falsos (para el cálculo de tamaño) ---
                 try
@@ -1327,10 +1349,25 @@ namespace Server
                     File.WriteAllText(filePath2, "Este es un segundo archivo de prueba, un poco más grande que el primero.");
                     
                     Console.WriteLine("Dummy image files for report created in ServerImages.");
+                    
+                    await LogPublisher.Publish(new LogMessageDTO
+                    {
+                        Level = "Info",
+                        Username = "System",
+                        Action = "SeedData",
+                        Message = "Imagenes de prueba iniciales creadas."
+                    });
                 }
                 catch (Exception e)
                 {
                     Console.WriteLine($"Error creating dummy image files: {e.Message}");
+                    await LogPublisher.Publish(new LogMessageDTO
+                    {
+                        Level = "Error",
+                        Username = "System",
+                        Action = "SeedDataFailed",
+                        Message = "Inscripciones a clases de prueba iniciales creadas."
+                    });
                 }
                 
                 var classWebhook = new OnlineClass(
@@ -1349,12 +1386,35 @@ namespace Server
                 inscriptionRepo.Add(inscriptionWebhook);
 
                 Console.WriteLine($"[Seed] Creada clase '{classWebhook.Name}' que empieza en 60s para probar Webhook.");
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Info",
+                    Username = "System",
+                    Action = "SeedData",
+                    Message = "Webhook de notificacion de clases de prueba iniciales creadas."
+                });
 
                 Console.WriteLine("Data seeding finished successfully.");
+                
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Info",
+                    Username = "System",
+                    Action = "SeedData",
+                    Message = $"Datos de prueba generados satisfactoriamente."
+                });
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Error during data seeding: {e.Message}");
+                
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Error",
+                    Username = "System",
+                    Action = "SeedDataFailed",
+                    Message = $"Error crítico durante el SeedData: {e.Message}"
+                });
             }
         }
     }
