@@ -1,7 +1,7 @@
 {
 	"info": {
 		"_postman_id": "43245cce-1199-4a29-ab4a-48d625dd44f9",
-		"name": "ProgDeRedes",
+		"name": "PDR Logs",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "47510174"
 	},
@@ -18,78 +18,22 @@
 					],
 					"path": [
 						"logs"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "logs by username",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{baseURL}}/logs?username=teo",
-					"host": [
-						"{{baseURL}}"
-					],
-					"path": [
-						"logs"
 					],
 					"query": [
 						{
 							"key": "username",
-							"value": "teo"
-						}
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "logs by action",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{baseURL}}/logs?action=ClassCreate",
-					"host": [
-						"{{baseURL}}"
-					],
-					"path": [
-						"logs"
-					],
-					"query": [
+							"value": null,
+							"disabled": true
+						},
 						{
 							"key": "action",
-							"value": "ClassCreate"
-						}
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "logs by username and level",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{baseURL}}/logs?username=pau&level=Warning",
-					"host": [
-						"{{baseURL}}"
-					],
-					"path": [
-						"logs"
-					],
-					"query": [
-						{
-							"key": "username",
-							"value": "pau"
+							"value": null,
+							"disabled": true
 						},
 						{
 							"key": "level",
-							"value": "Warning"
+							"value": null,
+							"disabled": true
 						}
 					]
 				}
