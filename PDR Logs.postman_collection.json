@@ -1,0 +1,107 @@
+{
+	"info": {
+		"_postman_id": "43245cce-1199-4a29-ab4a-48d625dd44f9",
+		"name": "PDR Logs",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "47510174"
+	},
+	"item": [
+		{
+			"name": "logs",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseURL}}/logs",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"logs"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "logs by username",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseURL}}/logs?username=pau",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"logs"
+					],
+					"query": [
+						{
+							"key": "username",
+							"value": "pau"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "logs by action",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseURL}}/logs?action=ClassCreate",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"logs"
+					],
+					"query": [
+						{
+							"key": "action",
+							"value": "ClassCreate"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "logs by username and level",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseURL}}/logs?username=teo&level=Info",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"logs"
+					],
+					"query": [
+						{
+							"key": "username",
+							"value": "teo"
+						},
+						{
+							"key": "level",
+							"value": "Info"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "baseURL",
+			"value": "",
+			"type": "default"
+		}
+	]
+}
