@@ -18,6 +18,7 @@ services:
       - obligatorio_default
 
   chatserver:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: ChatServer/Dockerfile
@@ -32,6 +33,7 @@ services:
       - obligatorio_default
 
   chatclient:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: ChatClient/Dockerfile
