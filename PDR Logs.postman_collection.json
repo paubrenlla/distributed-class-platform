@@ -1,7 +1,7 @@
 {
 	"info": {
 		"_postman_id": "43245cce-1199-4a29-ab4a-48d625dd44f9",
-		"name": "PDR Logs",
+		"name": "ProgDeRedes",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "47510174"
 	},
@@ -29,7 +29,7 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{baseURL}}/logs?username=pau",
+					"raw": "{{baseURL}}/logs?username=teo",
 					"host": [
 						"{{baseURL}}"
 					],
@@ -39,7 +39,7 @@
 					"query": [
 						{
 							"key": "username",
-							"value": "pau"
+							"value": "teo"
 						}
 					]
 				}
@@ -75,7 +75,7 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{baseURL}}/logs?username=teo&level=Info",
+					"raw": "{{baseURL}}/logs?username=pau&level=Warning",
 					"host": [
 						"{{baseURL}}"
 					],
@@ -85,11 +85,11 @@
 					"query": [
 						{
 							"key": "username",
-							"value": "teo"
+							"value": "pau"
 						},
 						{
 							"key": "level",
-							"value": "Info"
+							"value": "Warning"
 						}
 					]
 				}

@@ -6,6 +6,6 @@ public class LogMessageDTO
     public string Level { get; set; } // "Info", "Error", "Warning"
     public string Service { get; set; } = "ServerPrincipal";
     public string Username { get; set; }
-    public string Action { get; set; } // "Login", "CreateClass", etc.
+    public string Action { get; set; } // "SeedData", "Login", "CreateClass", etc.
     public string Message { get; set; }
 }
