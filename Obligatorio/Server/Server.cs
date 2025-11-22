@@ -944,6 +944,92 @@ namespace Server
                         loggedInUser = null;
                     }
                     break;
+                case ProtocolConstants.CommandValidateUser:
+                {
+                    try
+                    {
+                        string json = Encoding.UTF8.GetString(frame.Data);
+                        var req = JsonConvert.DeserializeObject<LoginRequestDTO>(json);
+                        var user = userRepo.GetByUsername(req.Username);
+                        bool ok = user != null && user.VerificarPassword(req.Password);
+                        string msg = ok ? "OK|User valid" : "ERR|Credenciales inválidas";
+                        return (new Frame{
+                            Header = ProtocolConstants.Response,
+                            Command = frame.Command,
+                            Data = Encoding.UTF8.GetBytes(msg)
+                        }, loggedInUser);
+                    }
+                    catch (Exception ex)
+                    {
+                        string msg = $"ERR|{ex.Message}";
+                        return (new Frame{
+                            Header = ProtocolConstants.Response,
+                            Command = frame.Command,
+                            Data = Encoding.UTF8.GetBytes(msg)
+                        }, loggedInUser);
+                    }
+                }
+
+                case ProtocolConstants.CommandValidateClassLink:
+                {
+                    try
+                    {
+                        string link = Encoding.UTF8.GetString(frame.Data);
+                        bool ok = classRepo.GetAll().Any(c => c.Link == link);
+                        string msg = ok ? "OK|Link válido" : "ERR|Link no válido";
+                        return (new Frame{
+                            Header = ProtocolConstants.Response,
+                            Command = frame.Command,
+                            Data = Encoding.UTF8.GetBytes(msg)
+                        }, loggedInUser);
+                    }
+                    catch (Exception ex)
+                    {
+                        string msg = $"ERR|{ex.Message}";
+                        return (new Frame{
+                            Header = ProtocolConstants.Response,
+                            Command = frame.Command,
+                            Data = Encoding.UTF8.GetBytes(msg)
+                        }, loggedInUser);
+                    }
+                }
+                case ProtocolConstants.CommandValidateEnrollment:
+                {
+                    var json = Encoding.UTF8.GetString(frame.Data);
+                    var dto = JsonConvert.DeserializeObject<ValidateEnrollmentDTO>(json);
+
+                    var user = userRepo.GetByUsername(dto.Username);
+                    var cls  = classRepo.GetByLink(dto.Link);
+
+                    bool ok = false;
+                    string reason = "";
+                    if (user == null || cls == null)
+                    {
+                        ok = false;
+                        reason = "Usuario o clase no existen.";
+                    }
+                    else
+                    {
+                        var inscriptos = inscriptionRepo.GetActiveClassByClassId(cls.Id);
+                        ok = inscriptos.Any(i => i.User.Username == user.Username);
+                        if (!ok) reason = "Usuario no está inscripto en la clase.";
+                    }
+
+                    var outMsg = ok ? "OK|enrollment" : $"ERR|{reason}";
+                    var outBytes = Encoding.UTF8.GetBytes(outMsg);
+
+                    return (new Frame
+                    {
+                        Header = ProtocolConstants.Response,
+                        Command = ProtocolConstants.CommandValidateEnrollment,
+                        Data = outBytes
+                    }, loggedInUser);
+                }
+
+
+                    
+                    
+
                 
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";

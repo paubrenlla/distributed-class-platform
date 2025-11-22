@@ -6,10 +6,17 @@ services:
       context: .
       dockerfile: AuthGrpc/Dockerfile
     container_name: authgrpc
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:5191
+      - AUTH_SERVER_HOST=server
+      - AUTH_SERVER_PORT=5000
     ports:
       - "5191:5191"
-    networks: [ obligatorio_default ]
-
+    depends_on:
+      - server
+    networks:
+      - obligatorio_default
+  
   chatserver:
     build:
       context: .
@@ -21,18 +28,23 @@ services:
       - authgrpc
     ports:
       - "8080:8080"
-    networks: [ obligatorio_default ]
+    networks:
+      - obligatorio_default
 
   chatclient:
     build:
       context: .
       dockerfile: ChatClient/Dockerfile
     container_name: chatclient
+    stdin_open: true
+    tty: true
     environment:
-      - CHAT_WS_URL=ws://chatserver:8080/ws
+      AUTH_GRPC_URL: http://authgrpc:5191
+      CHAT_WS_URL: ws://chatserver:8080/ws
     depends_on:
       - chatserver
-    networks: [ obligatorio_default ]
+    networks:
+      - obligatorio_default
       
   rabbitmq:
     image: rabbitmq:4-management
