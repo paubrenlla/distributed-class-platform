@@ -1301,12 +1301,10 @@ namespace Server
 
                 // Clase de hoy #2 (con inscripciones, con imagen)
                 var classToday2 = new OnlineClass("Taller de Redes (Hoy)", "Clase de hoy, con portada", 15, todayAfternoon, 90, pau);
-                classToday2.Image = "reporte_test_img.jpg"; // Asignamos un nombre de imagen
                 classRepo.Add(classToday2);
 
                 // Clase de hoy #3 (sin inscripciones, con imagen)
                 var classToday3 = new OnlineClass("Charla de C# (Hoy)", "Otra clase de hoy", 20, todayAfternoon.AddHours(2), 45, pau);
-                classToday3.Image = "reporte_test_img_2.jpg";
                 classRepo.Add(classToday3);
                 
                 Console.WriteLine("Classes for today's report created.");
@@ -1335,40 +1333,6 @@ namespace Server
                     Action = "SeedData",
                     Message = "Inscripciones a clases de prueba iniciales creadas."
                 });
-
-                // --- 5. Creación de Archivos de Imagen Falsos (para el cálculo de tamaño) ---
-                try
-                {
-                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
-                    Directory.CreateDirectory(imagesPath); // Asegura que la carpeta exista
-
-                    string filePath1 = Path.Combine(imagesPath, "reporte_test_img.jpg");
-                    File.WriteAllText(filePath1, "Este es un archivo de prueba con un tamaño."); // Crea un archivo con contenido
-
-                    string filePath2 = Path.Combine(imagesPath, "reporte_test_img_2.jpg");
-                    File.WriteAllText(filePath2, "Este es un segundo archivo de prueba, un poco más grande que el primero.");
-                    
-                    Console.WriteLine("Dummy image files for report created in ServerImages.");
-                    
-                    await LogPublisher.Publish(new LogMessageDTO
-                    {
-                        Level = "Info",
-                        Username = "System",
-                        Action = "SeedData",
-                        Message = "Imagenes de prueba iniciales creadas."
-                    });
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Error creating dummy image files: {e.Message}");
-                    await LogPublisher.Publish(new LogMessageDTO
-                    {
-                        Level = "Error",
-                        Username = "System",
-                        Action = "SeedDataFailed",
-                        Message = "Inscripciones a clases de prueba iniciales creadas."
-                    });
-                }
                 
                 var classWebhook = new OnlineClass(
                     "Clase Webhook Test", 

@@ -7,13 +7,11 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// WebSockets sobre HTTP/1.1 en :8080 (igual al estilo de los profes)
 builder.WebHost.ConfigureKestrel(o =>
 {
     o.ListenAnyIP(8080, lo => lo.Protocols = HttpProtocols.Http1);
 });
 
-// gRPC Auth client (apunta al AuthGrpc)
 var authUrl = Environment.GetEnvironmentVariable("AUTH_GRPC_URL") ?? "http://localhost:5191";
 builder.Services.AddSingleton(_ => GrpcChannel.ForAddress(authUrl));
 builder.Services.AddSingleton(sp => new Auth.AuthClient(sp.GetRequiredService<GrpcChannel>()));

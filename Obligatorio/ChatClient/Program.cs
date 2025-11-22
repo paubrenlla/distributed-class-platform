@@ -1,6 +1,6 @@
 ﻿using System.Net.WebSockets;
 using System.Text;
-using AuthGrpc;            // generado desde tu auth.proto
+using AuthGrpc;
 using Grpc.Net.Client;
 
 class Program
@@ -18,7 +18,6 @@ class Program
         Console.Write("Link de clase: ");
         var classLink = Console.ReadLine()?.Trim() ?? "";
 
-        // 1) Validación previa con gRPC (opcional pero prolija)
         try
         {
             using var channel = GrpcChannel.ForAddress(authUrl);
@@ -48,7 +47,6 @@ class Program
             return 1;
         }
 
-        // 2) Conexión WS pasando credenciales por QUERY (como haría un cliente web)
         var url = $"{wsBase}?u={Uri.EscapeDataString(username)}&p={Uri.EscapeDataString(password)}&link={Uri.EscapeDataString(classLink)}";
 
         using var ws = new ClientWebSocket();
