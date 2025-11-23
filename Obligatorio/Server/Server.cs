@@ -1366,30 +1366,6 @@ namespace Server
                     Action = "SeedData",
                     Message = "Inscripciones a clases de prueba iniciales creadas."
                 });
-                
-                var classWebhook = new OnlineClass(
-                    "Clase Webhook Test", 
-                    "Prueba automática de notificación", 
-                    5, 
-                    DateTimeOffset.Now.AddSeconds(60),
-                    30, 
-                    pau
-                );
-                classRepo.Add(classWebhook);
-
-                string miWebhookUrl = "https://webhook.site/e873d2f0-e892-43c6-8f59-306ab7b6073d"; 
-        
-                var inscriptionWebhook = new Inscription(teo, classWebhook, miWebhookUrl);
-                inscriptionRepo.Add(inscriptionWebhook);
-
-                Console.WriteLine($"[Seed] Creada clase '{classWebhook.Name}' que empieza en 60s para probar Webhook.");
-                await LogPublisher.Publish(new LogMessageDTO
-                {
-                    Level = "Info",
-                    Username = "System",
-                    Action = "SeedData",
-                    Message = "Webhook de notificacion de clases de prueba iniciales creadas."
-                });
 
                 Console.WriteLine("Data seeding finished successfully.");
                 
