@@ -642,10 +642,11 @@ namespace Server
                         responseMessage = "ERR|Debes iniciar sesión para modificar una clase.";
                         break;
                     }
+                    ModifyClassRequestDTO request = null;
                     try
                     {
                         string jsonPayload = Encoding.UTF8.GetString(frame.Data);
-                        var request = JsonConvert.DeserializeObject<ModifyClassRequestDTO>(jsonPayload);
+                        request = JsonConvert.DeserializeObject<ModifyClassRequestDTO>(jsonPayload);
         
                         var classToModify = classRepo.GetById(request.ClassId);
                         if (classToModify == null) throw new Exception("La clase no existe.");
@@ -664,11 +665,27 @@ namespace Server
                             activeInscriptions
                         );
                         responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
+
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Info",
+                            Username = loggedInUser.Username,
+                            Action = "ClassModify",
+                            Message = $"Usuario '{loggedInUser.Username}' modificó la clase '{classToModify.Name}' (ID: {request.ClassId})."
+                        });
                         
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
+
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Warning",
+                            Username = loggedInUser.Username,
+                            Action = "ClassModifyFailed",
+                            Message = $"Error al modificar clase (ID: {request?.ClassId}): {ex.Message}"
+                        });
                     }
                     break;
                 
