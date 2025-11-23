@@ -570,8 +570,8 @@ namespace Server
                     }
 
                     string jsonPayload = Encoding.UTF8.GetString(frame.Data);
-                    var request = JsonConvert.DeserializeObject<SearchRequestDTO>(jsonPayload);
-                    string filtroDesc = request.SearchTerm;
+                    var requestByDesc = JsonConvert.DeserializeObject<SearchRequestDTO>(jsonPayload);
+                    string filtroDesc = requestByDesc.SearchTerm;
                     
                     var clases = classRepo.GetAll()
                         .Where(c => c.Description.Contains(filtroDesc, StringComparison.OrdinalIgnoreCase))
@@ -606,8 +606,8 @@ namespace Server
                     try
                     {
                         string jsonPayload = Encoding.UTF8.GetString(frame.Data);
-                        var request = JsonConvert.DeserializeObject<SearchByAvailabilityRequestDTO>(jsonPayload);
-                        int minCupos = request.MinAvailableSpots;
+                        var requestByAvail = JsonConvert.DeserializeObject<SearchByAvailabilityRequestDTO>(jsonPayload);
+                        int minCupos = requestByAvail.MinAvailableSpots;
         
                         var clases = classRepo.GetAll()
                             .Where(c => DateTimeOffset.UtcNow < c.StartDate && (c.MaxCapacity - inscriptionRepo.GetActiveClassByClassId(c.Id).Count) > minCupos)
@@ -642,26 +642,26 @@ namespace Server
                         responseMessage = "ERR|Debes iniciar sesión para modificar una clase.";
                         break;
                     }
-                    ModifyClassRequestDTO request = null;
+                    ModifyClassRequestDTO requestModify = null;
                     try
                     {
                         string jsonPayload = Encoding.UTF8.GetString(frame.Data);
-                        request = JsonConvert.DeserializeObject<ModifyClassRequestDTO>(jsonPayload);
+                        requestModify = JsonConvert.DeserializeObject<ModifyClassRequestDTO>(jsonPayload);
         
-                        var classToModify = classRepo.GetById(request.ClassId);
+                        var classToModify = classRepo.GetById(requestModify.ClassId);
                         if (classToModify == null) throw new Exception("La clase no existe.");
 
                         if (classToModify.Creator.Id != loggedInUser.Id)
                             throw new Exception("No tienes permiso para modificar esta clase.");
 
-                        int activeInscriptions = inscriptionRepo.GetActiveClassByClassId(request.ClassId).Count;
+                        int activeInscriptions = inscriptionRepo.GetActiveClassByClassId(requestModify.ClassId).Count;
         
                         classToModify.Modificar(
-                            request.NewName, 
-                            request.NewDescription, 
-                            request.NewCapacity, 
-                            request.NewDate, 
-                            request.NewDuration, 
+                            requestModify.NewName, 
+                            requestModify.NewDescription, 
+                            requestModify.NewCapacity, 
+                            requestModify.NewDate, 
+                            requestModify.NewDuration, 
                             activeInscriptions
                         );
                         responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
@@ -671,7 +671,7 @@ namespace Server
                             Level = "Info",
                             Username = loggedInUser.Username,
                             Action = "ClassModify",
-                            Message = $"Usuario '{loggedInUser.Username}' modificó la clase '{classToModify.Name}' (ID: {request.ClassId})."
+                            Message = $"Usuario '{loggedInUser.Username}' modificó la clase '{classToModify.Name}' (ID: {requestModify.ClassId})."
                         });
                         
                     }
@@ -684,7 +684,7 @@ namespace Server
                             Level = "Warning",
                             Username = loggedInUser.Username,
                             Action = "ClassModifyFailed",
-                            Message = $"Error al modificar clase (ID: {request?.ClassId}): {ex.Message}"
+                            Message = $"Error al modificar clase (ID: {requestModify?.ClassId}): {ex.Message}"
                         });
                     }
                     break;
@@ -973,11 +973,27 @@ namespace Server
                     if (loggedInUser == null)
                     {
                         responseMessage = "ERR|No hay ninguna sesión activa para cerrar.";
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Warning",
+                            Username = "Anonymous",
+                            Action = "UserLogoutFailed",
+                            Message = "Intento de cerrar sesión sin usuario logueado."
+                        });
                     }
                     else
                     {
-                        responseMessage = $"OK|Sesión de '{loggedInUser.Username}' cerrada correctamente.";
+                        string username = loggedInUser.Username;
+                        responseMessage = $"OK|Sesión de '{username}' cerrada correctamente.";
                         loggedInUser = null;
+
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Info",
+                            Username = username,
+                            Action = "UserLogout",
+                            Message = $"Usuario '{username}' cerró sesión."
+                        });
                     }
                     break;
                 case ProtocolConstants.CommandValidateUser:
