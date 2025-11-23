@@ -72,5 +72,18 @@ namespace Repository
                 _semaphore.Release();
             }
         }
+
+        public List<Inscription> GetAll()
+        {
+            _semaphore.Wait();
+            try
+            {
+                return new List<Inscription>(_inscriptions);
+            }
+            finally
+            {
+                _semaphore.Release();
+            }
+        }
     }
 }

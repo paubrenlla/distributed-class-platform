@@ -1,0 +1,51 @@
+{
+	"info": {
+		"_postman_id": "43245cce-1199-4a29-ab4a-48d625dd44f9",
+		"name": "PDR Logs",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "47510174"
+	},
+	"item": [
+		{
+			"name": "logs",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseURL}}/logs",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"logs"
+					],
+					"query": [
+						{
+							"key": "username",
+							"value": null,
+							"disabled": true
+						},
+						{
+							"key": "action",
+							"value": null,
+							"disabled": true
+						},
+						{
+							"key": "level",
+							"value": null,
+							"disabled": true
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "baseURL",
+			"value": "",
+			"type": "default"
+		}
+	]
+}

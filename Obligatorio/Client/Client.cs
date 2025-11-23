@@ -4,6 +4,8 @@ using System.Net.Sockets;
 using System.Text;
 using Cliente;
 using Common;
+using Newtonsoft.Json;
+using Common.DTOs;
 
 namespace Client
 {
@@ -29,7 +31,7 @@ namespace Client
             {
                 IPAddress[] clientAddresses = Dns.GetHostAddresses(clientHostnameString);
                 clientIp = clientAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
-                           ?? throw new Exception($"Cannot resolve client hostname: {clientHostnameString}");
+                    ?? throw new Exception($"Cannot resolve client hostname: {clientHostnameString}");
             }
 
             string clientPortString = Environment.GetEnvironmentVariable(ClientConfig.ClientPortConfigKey) ?? "0";
@@ -51,8 +53,7 @@ namespace Client
             string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.SeverPortConfigKey) ?? "5000";
             int serverPort = int.Parse(serverPortString);
             IPEndPoint serverEndpoint = new IPEndPoint(serverIp, serverPort);
-
-
+            
             try
             {
                 await clientSocket.ConnectAsync(serverEndpoint);
@@ -126,24 +127,32 @@ namespace Client
                         string username = Console.ReadLine();
                         Console.Write("Contraseña: ");
                         string password = Console.ReadLine();
+                        
+                        var loginRequest = new LoginRequestDTO { Username = username, Password = password };
+                        string jsonPayload1 = JsonConvert.SerializeObject(loginRequest);
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
                             Command = ProtocolConstants.CommandLogin,
-                            Data = Encoding.UTF8.GetBytes($"{username}|{password}")
+                            Data = Encoding.UTF8.GetBytes(jsonPayload1)
                         };
+                        
                         break;
                     case "2": // Crear Usuario
                         Console.Write("Nuevo Usuario: ");
                         string newUsername = Console.ReadLine();
                         Console.Write("Nueva Contraseña: ");
                         string newPassword = Console.ReadLine();
+                        
+                        var createUserDto = new CreateUserRequestDTO { Username = newUsername, Password = newPassword };
+                        string jsonPayload2 = JsonConvert.SerializeObject(createUserDto);
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
                             Command = ProtocolConstants.CommandCreateUser,
-                            Data = Encoding.UTF8.GetBytes($"{newUsername}|{newPassword}")
+                            Data = Encoding.UTF8.GetBytes(jsonPayload2)
                         };
+                        
                         break;
                     case "3": // Salir
                         return AuthResult.Exit;
@@ -218,71 +227,128 @@ namespace Client
                         Console.Write("Ruta de la imagen de la clase (dejar vacío si no se quiere ingresar imagen): ");
                         string imagePath = Console.ReadLine();
 
-                        string payload = $"{name}|{desc}|{capacity}|{duration}|{startDateStr}";
-                        Frame classFrame = new Frame
+                        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(desc) || string.IsNullOrWhiteSpace(startDateStr))
                         {
-                            Header = ProtocolConstants.Request,
-                            Command = ProtocolConstants.CommandCreateClass,
-                            Data = Encoding.UTF8.GetBytes(payload)
-                        };
-                        Frame classCreated = await SendAndReceiveFrame(classFrame);
-                        string classCreatedStr = Encoding.UTF8.GetString(classCreated.Data ?? new byte[0]).Trim();
-
-                        int createdClassId = -1;
-                        if (classCreatedStr.StartsWith("OK|"))
-                        {
-                            var p = classCreatedStr.Split('|', 2);
-                            if (int.TryParse(p.Length > 1 ? p[1].Trim() : "", out int tmpId1))
-                                createdClassId = tmpId1;
-                            else // lo hacemos con linq por las dudas por si no llega a agarrar la id
-                            {
-                                
-                                var digits = new string((p.Length > 1 ? p[1] : "").Where(ch => char.IsDigit(ch)).ToArray());
-                                int.TryParse(digits, out createdClassId);
-                            }
-                        }
-                        else
-                        {
-                            int.TryParse(classCreatedStr, out createdClassId);
-                        }
-
-                        if (createdClassId <= 0)
-                        {
-                            Console.WriteLine("No se pudo obtener el ID de la clase creada. Se omitirá la subida de imagen.");
+                            Console.WriteLine("Error: Todos los campos de texto son obligatorios.");
                             requestFrame = null;
                             break;
                         }
 
-                        if (!string.IsNullOrEmpty(imagePath))
+                        if (!int.TryParse(capacity, out int maxCapacity) || maxCapacity <= 0)
                         {
-                            bool ok = await UploadImage(imagePath, createdClassId);
-                            if (!ok)
+                            Console.WriteLine("Error: El cupo máximo debe ser un número entero positivo.");
+                            requestFrame = null;
+                            break;
+                        }
+
+                        if (!int.TryParse(duration, out int durationMinutes) || durationMinutes <= 0)
+                        {
+                            Console.WriteLine("Error: La duración debe ser un número entero positivo.");
+                            requestFrame = null;
+                            break;
+                        }
+
+                        if (!DateTime.TryParse(startDateStr, out DateTime parsedDate))
+                        {
+                            Console.WriteLine("Error: La fecha debe tener el formato válido (AAAA-MM-DD HH:MM).");
+                            requestFrame = null;
+                            break;
+                        }
+
+                        try 
+                        {
+                            var createClassDto = new CreateClassRequestDTO
                             {
-                                Console.WriteLine("⚠️ La imagen no pudo subirse. La clase se creó igual sin portada.");
+                                Name = name,
+                                Description = desc,
+                                MaxCapacity = maxCapacity, 
+                                Duration = durationMinutes,
+                                StartDate = startDateStr
+                            };
+                            string jsonPayloadClass = JsonConvert.SerializeObject(createClassDto);
+                            Frame classFrame = new Frame
+                            {
+                                Header = ProtocolConstants.Request,
+                                Command = ProtocolConstants.CommandCreateClass,
+                                Data = Encoding.UTF8.GetBytes(jsonPayloadClass)
+                            };
+                            
+                            Frame classCreated = await SendAndReceiveFrame(classFrame);
+                            string classCreatedStr = Encoding.UTF8.GetString(classCreated.Data ?? new byte[0]).Trim();
+
+                            int createdClassId = -1;
+                            if (classCreatedStr.StartsWith("OK|"))
+                            {
+                                var p = classCreatedStr.Split('|', 2);
+                                if (int.TryParse(p.Length > 1 ? p[1].Trim() : "", out int tmpId1))
+                                    createdClassId = tmpId1;
+                                else 
+                                {
+                                    var digits = new string((p.Length > 1 ? p[1] : "").Where(ch => char.IsDigit(ch)).ToArray());
+                                    int.TryParse(digits, out createdClassId);
+                                }
                             }
+                            else
+                            {
+                                int.TryParse(classCreatedStr, out createdClassId);
+                            }
+
+                            if (createdClassId <= 0)
+                            {
+                                Console.WriteLine("No se pudo obtener el ID de la clase creada. Se omitirá la subida de imagen.");
+                                requestFrame = null;
+                                break;
+                            }
+                            
+                            Console.WriteLine($"Clase creada con éxito. ID: {createdClassId}");
+
+                            if (!string.IsNullOrEmpty(imagePath))
+                            {
+                                bool ok = await UploadImage(imagePath, createdClassId);
+                                if (!ok)
+                                {
+                                    Console.WriteLine("La imagen no pudo subirse. La clase se creó igual sin portada.");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error al crear la clase: {ex.Message}");
                         }
                         requestFrame = null; // Para evitar que se vuelva a enviar al final del while
                         break;
+
                     case "3": //Inscribirse a una clase
                         Console.Write("Ingresa el ID de la clase a la que quieres inscribirte: ");
                         string classId = Console.ReadLine();
-    
+
+                        Console.Write("Ingresa URL para Webhook (opcional - enter para omitir): ");
+                        string webhookUrl = Console.ReadLine();
+                        if (string.IsNullOrWhiteSpace(webhookUrl)) webhookUrl = null;
+
+                        var subscribeDto = new SubscribeClassRequestDTO 
+                        { 
+                            ClassId = int.Parse(classId), 
+                            WebhookUrl = webhookUrl 
+                        };
+
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
                             Command = ProtocolConstants.CommandSubscribeToClass,
-                            Data = Encoding.UTF8.GetBytes(classId)
+                            Data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(subscribeDto))
                         };
                         break;
                     case "4": //Cancelar inscripción
                         Console.Write("Ingresa el ID de la clase para cancelar tu inscripción: ");
                         string classIdToCancel = Console.ReadLine();
 
+                        var cancelDto = new ClassIdRequestDTO { ClassId = int.Parse(classIdToCancel) };
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
                             Command = ProtocolConstants.CommandCancelSubscription,
-                            Data = Encoding.UTF8.GetBytes(classIdToCancel)
+                            Data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(cancelDto))
                         };
                         break;
                     case "5": //Ver mi historial de actividades
@@ -310,14 +376,23 @@ namespace Client
                         Console.Write("Ruta de nueva imagen: ");
                         string modImagePath = Console.ReadLine();
 
-                        string modPayload = $"{modId}|{modName}|{modDesc}|{modCap}|{modDur}|{modDate}";
-    
+                        var modifyDto = new ModifyClassRequestDTO
+                        {
+                            ClassId = int.Parse(modId),
+                            NewName = modName,
+                            NewDescription = modDesc,
+                            NewCapacity = modCap, // Dejamos como string, el servidor lo parsea
+                            NewDuration = modDur,
+                            NewDate = modDate
+                        };
+                        string jsonPayloadModify = JsonConvert.SerializeObject(modifyDto);
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
                             Command = ProtocolConstants.CommandModifyClass,
-                            Data = Encoding.UTF8.GetBytes(modPayload)
+                            Data = Encoding.UTF8.GetBytes(jsonPayloadModify)
                         };
+                        
                         Frame modResponse = await SendAndReceiveFrame(requestFrame);
                         string modRespStr = Encoding.UTF8.GetString(modResponse.Data ?? new byte[0]);
                         ProcessSimpleResponse(modRespStr);
@@ -335,11 +410,12 @@ namespace Client
                         Console.Write("Ingresa el ID de la clase a eliminar: ");
                         string deleteId = Console.ReadLine();
     
+                        var deleteDto = new ClassIdRequestDTO { ClassId = int.Parse(deleteId) };
                         requestFrame = new Frame
                         {
                             Header = ProtocolConstants.Request,
                             Command = ProtocolConstants.CommandDeleteClass,
-                            Data = Encoding.UTF8.GetBytes(deleteId)
+                            Data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(deleteDto))
                         };
                         break;
                     case "8": //Buscar clases
@@ -350,17 +426,32 @@ namespace Client
                             case "1": 
                                 Console.Write("Ingresa el nombre a buscar: ");
                                 string filtroNombre = Console.ReadLine();
-                                requestFrame = new Frame { Command = ProtocolConstants.SearchClassesByNamwe, Data = Encoding.UTF8.GetBytes(filtroNombre) };
+                                var searchNameDto = new SearchRequestDTO { SearchTerm = filtroNombre };
+                                requestFrame = new Frame { Command = ProtocolConstants.SearchClassesByName, Data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(searchNameDto)) };
                                 break;
                             case "2": 
                                 Console.Write("Ingresa la descripción a buscar: ");
                                 string filtroDesc = Console.ReadLine();
-                                requestFrame = new Frame { Command = ProtocolConstants.SearchClassesByDescription, Data = Encoding.UTF8.GetBytes(filtroDesc) };
+                                var searchDesceDto = new SearchRequestDTO { SearchTerm = filtroDesc };
+                                requestFrame = new Frame { Command = ProtocolConstants.SearchClassesByName, Data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(searchDesceDto)) };
                                 break;
                             case "3": 
                                 Console.Write("Ingresa la cantidad mínima de cupos disponibles: ");
                                 string minCuposStr = Console.ReadLine();
-                                requestFrame = new Frame { Command = ProtocolConstants.SearchClassesByAvailabilty, Data = Encoding.UTF8.GetBytes(minCuposStr) };
+                                
+                                if (int.TryParse(minCuposStr, out int minCupos))
+                                {
+                                    var availabilityDto = new SearchByAvailabilityRequestDTO { MinAvailableSpots = minCupos };
+                                    requestFrame = new Frame 
+                                    { 
+                                        Command = ProtocolConstants.SearchClassesByAvailabilty, 
+                                        Data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(availabilityDto)) 
+                                    };
+                                }
+                                else
+                                {
+                                    Console.WriteLine("Error: Debes ingresar un número válido.");
+                                }
                                 break;
                             case "4": 
                                 requestFrame = new Frame { Command = ProtocolConstants.CommandListClasses, Data = null };
@@ -395,11 +486,12 @@ namespace Client
                             Console.Write("Ingresa el ID de la clase: ");
                             string downloadId = Console.ReadLine();
 
+                            var downloadDto = new ClassIdRequestDTO { ClassId = int.Parse(downloadId) };
                             Frame downloadFrame = new Frame
                             {
                                 Header = ProtocolConstants.Request,
                                 Command = ProtocolConstants.CommandDownloadImage,
-                                Data = Encoding.UTF8.GetBytes(downloadId)
+                                Data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(downloadDto))
                             };
 
                             await _networkHelper.Send(downloadFrame);
@@ -536,7 +628,7 @@ namespace Client
             {
                 ProtocolConstants.CommandListClasses,
                 ProtocolConstants.SearchAvailableClasses,
-                ProtocolConstants.SearchClassesByNamwe, 
+                ProtocolConstants.SearchClassesByName, 
                 ProtocolConstants.SearchClassesByDescription,
                 ProtocolConstants.SearchClassesByAvailabilty
             };

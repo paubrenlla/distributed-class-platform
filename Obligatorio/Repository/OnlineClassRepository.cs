@@ -83,7 +83,7 @@ namespace Repository
             _semaphore.Wait();
             try
             {
-                var clase = GetById(id);
+                var clase = _clases.FirstOrDefault(c => c.Id == id);
                 if (clase == null)
                     throw new InvalidOperationException("Clase no encontrada");
 
@@ -119,6 +119,21 @@ namespace Repository
                 if (clase == null) throw new InvalidOperationException("Clase no encontrada");
 
                 clase.Image = newFileName;
+            }
+            finally
+            {
+                _semaphore.Release();
+            }
+        }
+
+        public OnlineClass GetByLink(string dtoLink)
+        {
+            _semaphore.Wait();
+            try
+            {
+                var clase = _clases.FirstOrDefault(c => c.Link == dtoLink);
+                if (clase == null) throw new InvalidOperationException("Clase no encontrada");
+                return clase;
             }
             finally
             {

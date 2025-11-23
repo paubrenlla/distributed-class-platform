@@ -1,15 +1,102 @@
-﻿#version: "3.9"
+﻿# version: "3.9"
 
 services:
+  authgrpc:
+    build:
+      context: .
+      dockerfile: AuthGrpc/Dockerfile
+    container_name: authgrpc
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:5191
+      - AUTH_SERVER_HOST=server
+      - AUTH_SERVER_PORT=5000
+    ports:
+      - "5191:5191"
+    depends_on:
+      - server
+    networks:
+      - obligatorio_default
+
+  chatserver:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: ChatServer/Dockerfile
+    container_name: chatserver
+    environment:
+      - AUTH_GRPC_URL=http://authgrpc:5191
+    depends_on:
+      - authgrpc
+    ports:
+      - "8080:8080"
+    networks:
+      - obligatorio_default
+
+  chatclient:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: ChatClient/Dockerfile
+    container_name: chatclient
+    stdin_open: true
+    tty: true
+    environment:
+      AUTH_GRPC_URL: http://authgrpc:5191
+      CHAT_WS_URL: ws://chatserver:8080/ws
+    depends_on:
+      - chatserver
+    networks:
+      - obligatorio_default
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: app
+      RABBITMQ_DEFAULT_PASS: app
+    networks:
+      - obligatorio_default
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  logs-consumer:
+    build:
+      context: .
+      dockerfile: LogsConsumer/Dockerfile
+    container_name: logs-consumer
+    environment:
+      - RABBIT_HOST=rabbitmq
+      - RABBIT_USER=app
+      - RABBIT_PASS=app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - obligatorio_default
+    stdin_open: true
+    tty: true
+    ports:
+      - "8081:8080"
+
   server:
     build:
-      context: . 
+      context: .
       dockerfile: Server/Dockerfile
     container_name: servidor
     environment:
       - SERVER_HOSTNAME=0.0.0.0
       - SERVER_PORT=5000
       - RECEIVE_DIRECTORY=/app/publish/ServerImages
+      - RABBIT_HOST=rabbitmq
+      - RABBIT_USER=app
+      - RABBIT_PASS=app
+      - TZ=America/Montevideo
     stdin_open: true
     tty: true
     volumes:
@@ -18,6 +105,9 @@ services:
       - "5000:5000"
     networks:
       - obligatorio_default
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   cliente:
     build:
@@ -29,6 +119,7 @@ services:
       - SERVER_PORT=5000
       - CLIENT_HOSTNAME=client
       - CLIENT_PORT=0
+      - TZ=America/Montevideo
     stdin_open: true
     tty: true
     networks:

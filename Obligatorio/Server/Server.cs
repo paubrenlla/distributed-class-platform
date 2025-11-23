@@ -6,6 +6,9 @@ using System.Collections.Concurrent;
 using Common;
 using Repository;
 using Domain;
+using Newtonsoft.Json;
+using Common.DTOs;
+using Server.Services;
 
 namespace Server
 {
@@ -25,6 +28,7 @@ namespace Server
         
         static async Task Main(string[] args)
         {
+            await LogPublisher.InitAsync();
             SeedData();
             Console.WriteLine("Server starting with preloaded data...");
             string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
@@ -37,9 +41,13 @@ namespace Server
             }
             else
             {
-                IPAddress[] addresses = Dns.GetHostAddresses(serverHostnameString);
-                serverIp = addresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
-                           ?? throw new Exception($"Cannot resolve hostname: {serverHostnameString}");
+                try {
+                    IPAddress[] serverAddresses = Dns.GetHostAddresses(serverHostnameString);
+                    serverIp = serverAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork) 
+                               ?? IPAddress.Any;
+                } catch {
+                    serverIp = IPAddress.Any;
+                }
             }
 
             int serverPort = int.Parse(serverPortString);
@@ -51,7 +59,7 @@ namespace Server
             {
                 Directory.CreateDirectory(receiveDirectory);
             }
-            Console.WriteLine($"🗂️ Carpeta de imágenes del servidor: {Path.GetFullPath(receiveDirectory)}");
+            Console.WriteLine($"Carpeta de imágenes del servidor: {Path.GetFullPath(receiveDirectory)}");
 
 
             serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -59,18 +67,31 @@ namespace Server
             serverSocket.Listen(10);
             Console.WriteLine($"Servidor escuchando en {serverIp}:{serverPort}");
             Console.WriteLine("Presiona Ctrl+C para cerrar (en Docker, se detiene con docker stop)");
+            
+            CancellationTokenSource globalCts = new CancellationTokenSource();
+            var webhookService = new WebhookNotificationService(inscriptionRepo);
 
             Task acceptClientsTask = AcceptClients();
             
             Task consoleListenerTask = ListenForServerCommands();
             
-            await Task.WhenAny(acceptClientsTask, consoleListenerTask);
+            Task webhookTask = Task.Run(() => webhookService.StartAsync(globalCts.Token));
             
+            await Task.WhenAny(acceptClientsTask, consoleListenerTask, webhookTask);
+            
+            // CIERRE DEL SERVIDOR
+            Console.WriteLine("Iniciando apagado...");
+    
             isRunning = false;
-            serverReportCts?.Cancel();
+    
+            globalCts.Cancel(); 
+    
+            serverReportCts?.Cancel(); 
+
             Console.WriteLine("Cerrando sockets...");
-            CloseAllClientSockets(); 
+            CloseAllClientSockets();
             try { serverSocket?.Close(); } catch { }
+    
             Console.WriteLine("Servidor detenido.");
         }
 
@@ -200,20 +221,35 @@ namespace Server
             switch (frame.Command)
             {
                 case ProtocolConstants.CommandCreateUser:
+                    CreateUserRequestDTO requestDto = null;
                     try
                     {
-                        string payload = Encoding.UTF8.GetString(frame.Data);
-                        var parts = payload.Split('|');
-                        if (parts.Length < 2) throw new Exception("Formato incorrecto. Se esperaba 'usuario|clave'.");
-
-                        var user = new User(parts[0], parts[1]);
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        requestDto = JsonConvert.DeserializeObject<CreateUserRequestDTO>(jsonPayload);
+                        var user = new User(requestDto.Username, requestDto.Password);
+        
                         userRepo.Add(user);
+                        responseMessage = $"OK|Usuario '{requestDto.Username}' creado exitosamente.";
                         
-                        responseMessage = $"OK|Usuario '{parts[0]}' creado exitosamente.";
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Info",
+                            Username = requestDto.Username, // El usuario nuevo
+                            Action = "UserCreate",
+                            Message = $"Usuario '{requestDto.Username}' fue creado."
+                        });
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
+                        
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Error",
+                            Username = requestDto?.Username ?? "desconocido",
+                            Action = "UserCreateFailed",
+                            Message = $"Error al crear usuario: {ex.Message}"
+                        });
                     }
                     break;
 
@@ -225,25 +261,37 @@ namespace Server
                     }
                     try
                     {
-                        string credentials = Encoding.UTF8.GetString(frame.Data);
-                        var parts = credentials.Split('|');
-                        if (parts.Length < 2) throw new Exception("Formato incorrecto. Se esperaba 'usuario|clave'.");
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        LoginRequestDTO request = JsonConvert.DeserializeObject<LoginRequestDTO>(jsonPayload);
 
-                        var user = userRepo.GetByUsername(parts[0]);
-                        if (user != null && user.VerificarPassword(parts[1]))
+                        var user = userRepo.GetByUsername(request.Username);
+                        if (user != null && user.VerificarPassword(request.Password))
                         {
                             loggedInUser = user;
                             responseMessage = $"OK|Bienvenido, {user.Username}!";
+                            await LogPublisher.Publish(new LogMessageDTO
+                            {
+                                Level = "Info",
+                                Username = user.Username,
+                                Action = "UserLogin",
+                                Message = $"Usuario '{user.Username}' inició sesión."
+                            });
                         }
                         else
                         {
                             responseMessage = "ERR|Usuario o contraseña incorrectos.";
+                            await LogPublisher.Publish(new LogMessageDTO
+                            {
+                                Level = "Warning",
+                                Username = request.Username,
+                                Action = "UserLoginFailed",
+                                Message = "Intento de login fallido."
+                            });
                         }
                     }
                     catch(Exception ex)
                     {
-                        responseMessage = $"ERR|{ex.Message}";
-                    }
+                        responseMessage = $"ERR|{ex.Message}";                    }
                     break;
                     
                 case ProtocolConstants.CommandListClasses:
@@ -279,29 +327,49 @@ namespace Server
                     }
                     try
                     {
-                        string payload = Encoding.UTF8.GetString(frame.Data);
-                        var parts = payload.Split('|');
-                        if (parts.Length < 4) throw new Exception("Datos incompletos para crear la clase.");
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        var request = JsonConvert.DeserializeObject<CreateClassRequestDTO>(jsonPayload);
 
-                        string name = parts[0];
-                        string description = parts[1];
-                        int maxCapacity = int.Parse(parts[2]);
-                        int duration = int.Parse(parts[3]);
-                        DateTimeOffset startDate = DateTimeOffset.Parse(parts[4]);
-
-                        
-                        var newClass = new OnlineClass(name, description, maxCapacity, startDate, duration, loggedInUser);
+                        var newClass = new OnlineClass(
+                            request.Name, 
+                            request.Description, 
+                            request.MaxCapacity, 
+                            DateTimeOffset.Parse(request.StartDate), 
+                            request.Duration, 
+                            loggedInUser
+                        );
                         classRepo.Add(newClass);
-
-                        responseMessage = $"OK|Clase creada con éxito con el ID: {newClass.Id}";
+                        responseMessage = $"OK|{newClass.Id}";
+                        
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Info",
+                            Username = loggedInUser.Username,
+                            Action = "ClassCreate",
+                            Message = $"Usuario '{loggedInUser.Username}' creó la clase '{newClass.Name}' (ID: {newClass.Id})."
+                        });
                     }
                     catch (FormatException)
                     {
                         responseMessage = "ERR|El formato de la fecha es incorrecto. Use AAAA-MM-DD HH:MM";
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Error",
+                            Username = loggedInUser?.Username ?? "desconocido",
+                            Action = "ClassCreateFailed",
+                            Message = $"Error al crear clase: Formato de fecha invalido"
+                        });
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Error",
+                            Username = loggedInUser?.Username ?? "desconocido",
+                            Action = "ClassCreateFailed",
+                            Message = $"Error al crear clase: {ex.Message}"
+                        });
                     }
                     break;
                 
@@ -311,28 +379,47 @@ namespace Server
                         responseMessage = "ERR|Debes iniciar sesión para inscribirte.";
                         break;
                     }
+                    ClassIdRequestDTO subscribeRequest = null;
                     try
                     {
-                        int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
-                            var classToJoin = classRepo.GetById(classId);
-                            if (classToJoin == null) throw new Exception("La clase no existe.");
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        subscribeRequest = JsonConvert.DeserializeObject<ClassIdRequestDTO>(jsonPayload);
+                        int classId = subscribeRequest.ClassId;
+                        string? webhookUrl = subscribeRequest.WebhookUrl;
 
-                            if (inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId) != null)
-                                throw new Exception("Ya estás inscrito en esta clase.");
+                        var classToJoin = classRepo.GetById(classId);
+                        if (classToJoin == null) throw new Exception("La clase no existe.");
 
-                            var activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId);
-                            if (activeInscriptions.Count >= classToJoin.MaxCapacity)
-                                throw new Exception("La clase no tiene cupos disponibles.");
+                        if (inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId) != null)
+                            throw new Exception("Ya estás inscrito en esta clase.");
 
-                            var newInscription = new Inscription(loggedInUser, classToJoin);
-                            inscriptionRepo.Add(newInscription);
+                        var activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId);
+                        if (activeInscriptions.Count >= classToJoin.MaxCapacity)
+                            throw new Exception("La clase no tiene cupos disponibles.");
 
-                            responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";
+                        var newInscription = new Inscription(loggedInUser, classToJoin, webhookUrl);
+                        inscriptionRepo.Add(newInscription);
+
+                        responseMessage = $"OK|Inscripción a '{classToJoin.Name}' realizada con éxito.";                        
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Info",
+                            Username = loggedInUser.Username,
+                            Action = "ClassSubscribe",
+                            Message = $"Usuario '{loggedInUser.Username}' se inscribió a la clase '{classToJoin.Name}' (ID: {classId})."
+                        });
                         
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Warning",
+                            Username = loggedInUser.Username,
+                            Action = "ClassSubscribeFailed",
+                            Message = $"Error al inscribir a clase (ID: {subscribeRequest?.ClassId}): {ex.Message}"
+                        });
                     }
                     break;
 
@@ -342,27 +429,45 @@ namespace Server
                         responseMessage = "ERR|Debes iniciar sesión para cancelar una inscripción.";
                         break;
                     }
+                    ClassIdRequestDTO cancelRequest = null;
                     try
                     {
-                        int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        cancelRequest = JsonConvert.DeserializeObject<ClassIdRequestDTO>(jsonPayload);
+                        int classId = cancelRequest.ClassId;
         
+                        var inscription = inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId);        
                         
-                            var inscription = inscriptionRepo.GetActiveByUserAndClass(loggedInUser.Id, classId);
-                            if (inscription == null) 
-                                throw new Exception("No estás inscrito en esta clase.");
+                        if (inscription == null) 
+                            throw new Exception("No estás inscrito en esta clase.");
 
-                            var remainingTime = inscription.Class.StartDate - DateTimeOffset.UtcNow;
-                            if (remainingTime.TotalMinutes < 2)
-                                throw new InvalidOperationException("No se puede cancelar la inscripción con menos de 2 minutos de antelación.");
+                        var remainingTime = inscription.Class.StartDate - DateTimeOffset.UtcNow;
+                        if (remainingTime.TotalMinutes < 2)
+                            throw new InvalidOperationException("No se puede cancelar la inscripción con menos de 2 minutos de antelación.");
 
-                            inscription.Cancel();
-            
-                            responseMessage = $"OK|Tu inscripción a la clase '{inscription.Class.Name}' ha sido cancelada.";
+                        inscription.Cancel();
+        
+                        responseMessage = $"OK|Tu inscripción a la clase '{inscription.Class.Name}' ha sido cancelada.";
                         
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Info",
+                            Username = loggedInUser.Username,
+                            Action = "ClassUnsubscribe",
+                            Message = $"Usuario '{loggedInUser.Username}' canceló inscripción a la clase '{inscription.Class.Name}' (ID: {classId})."
+                        });
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
+                        
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Warning",
+                            Username = loggedInUser.Username,
+                            Action = "ClassUnsubscribeFailed",
+                            Message = $"Error al cancelar inscripción (ID: {cancelRequest?.ClassId}): {ex.Message}"
+                        });
                     }
                     break;
 
@@ -423,7 +528,7 @@ namespace Server
                     break;
                 }
 
-                case ProtocolConstants.SearchClassesByNamwe:
+                case ProtocolConstants.SearchClassesByName:
                 {
                     if (loggedInUser == null)
                     {
@@ -431,7 +536,9 @@ namespace Server
                         break;
                     }
 
-                    string filtroNombre = Encoding.UTF8.GetString(frame.Data);
+                    string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                    var request = JsonConvert.DeserializeObject<SearchRequestDTO>(jsonPayload);
+                    string filtroNombre = request.SearchTerm;
                     var clases = classRepo.GetAll()
                         .Where(c => c.Name.Contains(filtroNombre, StringComparison.OrdinalIgnoreCase))
                         .ToList();
@@ -462,7 +569,10 @@ namespace Server
                         break;
                     }
 
-                    string filtroDesc = Encoding.UTF8.GetString(frame.Data);
+                    string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                    var requestByDesc = JsonConvert.DeserializeObject<SearchRequestDTO>(jsonPayload);
+                    string filtroDesc = requestByDesc.SearchTerm;
+                    
                     var clases = classRepo.GetAll()
                         .Where(c => c.Description.Contains(filtroDesc, StringComparison.OrdinalIgnoreCase))
                         .ToList();
@@ -493,19 +603,23 @@ namespace Server
                         break;
                     }
 
-                    if (int.TryParse(Encoding.UTF8.GetString(frame.Data), out int minCupos))
+                    try
                     {
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        var requestByAvail = JsonConvert.DeserializeObject<SearchByAvailabilityRequestDTO>(jsonPayload);
+                        int minCupos = requestByAvail.MinAvailableSpots;
+        
                         var clases = classRepo.GetAll()
                             .Where(c => DateTimeOffset.UtcNow < c.StartDate && (c.MaxCapacity - inscriptionRepo.GetActiveClassByClassId(c.Id).Count) > minCupos)
                             .ToList();
 
                         if (clases.Count == 0)
                         {
-                            responseMessage = "OK|No hay clases con cupos disponibles.";
+                            responseMessage = "OK|No hay clases con esa disponibilidad.";
                         }
                         else
                         {
-                            var sb = new System.Text.StringBuilder();
+                            var sb = new StringBuilder();
                             sb.Append("OK|");
                             foreach (var c in clases)
                             {
@@ -515,9 +629,9 @@ namespace Server
                             responseMessage = sb.ToString().TrimEnd('\n');
                         }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        responseMessage = "ERR|Parámetro inválido (se esperaba un número).";
+                        responseMessage = $"ERR|Error al procesar la solicitud: {ex.Message}";
                     }
                     break;
                 }
@@ -528,37 +642,50 @@ namespace Server
                         responseMessage = "ERR|Debes iniciar sesión para modificar una clase.";
                         break;
                     }
+                    ModifyClassRequestDTO requestModify = null;
                     try
                     {
-                        string payload = Encoding.UTF8.GetString(frame.Data);
-                        var parts = payload.Split('|');
-                        if (parts.Length < 6) throw new Exception("Datos incompletos para modificar la clase.");
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        requestModify = JsonConvert.DeserializeObject<ModifyClassRequestDTO>(jsonPayload);
+        
+                        var classToModify = classRepo.GetById(requestModify.ClassId);
+                        if (classToModify == null) throw new Exception("La clase no existe.");
 
-                        int classId = int.Parse(parts[0]);
-                 
-                        
-                            var classToModify = classRepo.GetById(classId);
-                            if (classToModify == null) throw new Exception("La clase no existe.");
-    
-                            if (classToModify.Creator.Id != loggedInUser.Id)
-                                throw new Exception("No tienes permiso para modificar esta clase.");
+                        if (classToModify.Creator.Id != loggedInUser.Id)
+                            throw new Exception("No tienes permiso para modificar esta clase.");
 
-                            int activeInscriptions = inscriptionRepo.GetActiveClassByClassId(classId).Count;
+                        int activeInscriptions = inscriptionRepo.GetActiveClassByClassId(requestModify.ClassId).Count;
+        
+                        classToModify.Modificar(
+                            requestModify.NewName, 
+                            requestModify.NewDescription, 
+                            requestModify.NewCapacity, 
+                            requestModify.NewDate, 
+                            requestModify.NewDuration, 
+                            activeInscriptions
+                        );
+                        responseMessage = $"OK|Clase '{classToModify.Name}' modificada con éxito.";
 
-                            string newName = parts[1];
-                            string newDesc = parts[2];
-                            string newCapacity = parts[3];
-                            string newDuration = parts[4];
-                            string newDate = parts[5];
-
-                            classToModify.Modificar(newName, newDesc, newCapacity, newDate, newDuration, activeInscriptions);
-
-                            responseMessage = $"OK|Clase '{newName}' modificada con éxito.";
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Info",
+                            Username = loggedInUser.Username,
+                            Action = "ClassModify",
+                            Message = $"Usuario '{loggedInUser.Username}' modificó la clase '{classToModify.Name}' (ID: {requestModify.ClassId})."
+                        });
                         
                     }
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
+
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Warning",
+                            Username = loggedInUser.Username,
+                            Action = "ClassModifyFailed",
+                            Message = $"Error al modificar clase (ID: {requestModify?.ClassId}): {ex.Message}"
+                        });
                     }
                     break;
                 
@@ -568,9 +695,12 @@ namespace Server
                         responseMessage = "ERR|Debes iniciar sesión para eliminar una clase.";
                         break;
                     }
+                    ClassIdRequestDTO deleteRequest = null;
                     try
                     {
-                        int classId = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        deleteRequest = JsonConvert.DeserializeObject<ClassIdRequestDTO>(jsonPayload);
+                        int classId = deleteRequest.ClassId;
         
                         await Program.ImageSemaphore.WaitAsync();
                         try
@@ -598,7 +728,7 @@ namespace Server
                                     }
                                     catch (Exception ex) 
                                     {
-                                        Console.WriteLine($"⚠️ No se pudo eliminar la imagen '{classToDelete.Image}': {ex.Message}");
+                                        Console.WriteLine($"No se pudo eliminar la imagen '{classToDelete.Image}': {ex.Message}");
                                     }
                                 }
                             }
@@ -607,6 +737,14 @@ namespace Server
                             classRepo.Delete(classId);
 
                             responseMessage = $"OK|La clase '{classToDelete.Name}' ha sido eliminada.";
+                            
+                            await LogPublisher.Publish(new LogMessageDTO
+                            {
+                                Level = "Info",
+                                Username = loggedInUser.Username,
+                                Action = "ClassDelete",
+                                Message = $"Usuario '{loggedInUser.Username}' eliminó la clase '{classToDelete.Name}' (ID: {classId})."
+                            });
                         }
                         finally
                         {
@@ -616,6 +754,14 @@ namespace Server
                     catch (Exception ex)
                     {
                         responseMessage = $"ERR|{ex.Message}";
+                        
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Warning",
+                            Username = loggedInUser.Username,
+                            Action = "ClassDeleteFailed",
+                            Message = $"Error al eliminar clase (ID: {deleteRequest?.ClassId}): {ex.Message}"
+                        });
                     }
                     break;
                 
@@ -749,7 +895,10 @@ namespace Server
 
                     try
                     {
-                        int classIdDownload = int.Parse(Encoding.UTF8.GetString(frame.Data));
+                        string jsonPayload = Encoding.UTF8.GetString(frame.Data);
+                        var request = JsonConvert.DeserializeObject<ClassIdRequestDTO>(jsonPayload);
+                        int classIdDownload = request.ClassId;
+
                         OnlineClass classToDownload = classRepo.GetById(classIdDownload);
                         if (classToDownload == null) throw new Exception("La clase no existe.");
                     if (string.IsNullOrEmpty(classToDownload.Image))
@@ -824,13 +973,115 @@ namespace Server
                     if (loggedInUser == null)
                     {
                         responseMessage = "ERR|No hay ninguna sesión activa para cerrar.";
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Warning",
+                            Username = "Anonymous",
+                            Action = "UserLogoutFailed",
+                            Message = "Intento de cerrar sesión sin usuario logueado."
+                        });
                     }
                     else
                     {
-                        responseMessage = $"OK|Sesión de '{loggedInUser.Username}' cerrada correctamente.";
+                        string username = loggedInUser.Username;
+                        responseMessage = $"OK|Sesión de '{username}' cerrada correctamente.";
                         loggedInUser = null;
+
+                        await LogPublisher.Publish(new LogMessageDTO
+                        {
+                            Level = "Info",
+                            Username = username,
+                            Action = "UserLogout",
+                            Message = $"Usuario '{username}' cerró sesión."
+                        });
                     }
                     break;
+                case ProtocolConstants.CommandValidateUser:
+                {
+                    try
+                    {
+                        string json = Encoding.UTF8.GetString(frame.Data);
+                        var req = JsonConvert.DeserializeObject<LoginRequestDTO>(json);
+                        var user = userRepo.GetByUsername(req.Username);
+                        bool ok = user != null && user.VerificarPassword(req.Password);
+                        string msg = ok ? "OK|User valid" : "ERR|Credenciales inválidas";
+                        return (new Frame{
+                            Header = ProtocolConstants.Response,
+                            Command = frame.Command,
+                            Data = Encoding.UTF8.GetBytes(msg)
+                        }, loggedInUser);
+                    }
+                    catch (Exception ex)
+                    {
+                        string msg = $"ERR|{ex.Message}";
+                        return (new Frame{
+                            Header = ProtocolConstants.Response,
+                            Command = frame.Command,
+                            Data = Encoding.UTF8.GetBytes(msg)
+                        }, loggedInUser);
+                    }
+                }
+
+                case ProtocolConstants.CommandValidateClassLink:
+                {
+                    try
+                    {
+                        string link = Encoding.UTF8.GetString(frame.Data);
+                        bool ok = classRepo.GetAll().Any(c => c.Link == link);
+                        string msg = ok ? "OK|Link válido" : "ERR|Link no válido";
+                        return (new Frame{
+                            Header = ProtocolConstants.Response,
+                            Command = frame.Command,
+                            Data = Encoding.UTF8.GetBytes(msg)
+                        }, loggedInUser);
+                    }
+                    catch (Exception ex)
+                    {
+                        string msg = $"ERR|{ex.Message}";
+                        return (new Frame{
+                            Header = ProtocolConstants.Response,
+                            Command = frame.Command,
+                            Data = Encoding.UTF8.GetBytes(msg)
+                        }, loggedInUser);
+                    }
+                }
+                case ProtocolConstants.CommandValidateEnrollment:
+                {
+                    var json = Encoding.UTF8.GetString(frame.Data);
+                    var dto = JsonConvert.DeserializeObject<ValidateEnrollmentDTO>(json);
+
+                    var user = userRepo.GetByUsername(dto.Username);
+                    var cls  = classRepo.GetByLink(dto.Link);
+
+                    bool ok = false;
+                    string reason = "";
+                    if (user == null || cls == null)
+                    {
+                        ok = false;
+                        reason = "Usuario o clase no existen.";
+                    }
+                    else
+                    {
+                        var inscriptos = inscriptionRepo.GetActiveClassByClassId(cls.Id);
+                        ok = inscriptos.Any(i => i.User.Username == user.Username);
+                        if (!ok) reason = "Usuario no está inscripto en la clase.";
+                    }
+
+                    var outMsg = ok ? "OK|enrollment" : $"ERR|{reason}";
+                    var outBytes = Encoding.UTF8.GetBytes(outMsg);
+
+                    return (new Frame
+                    {
+                        Header = ProtocolConstants.Response,
+                        Command = ProtocolConstants.CommandValidateEnrollment,
+                        Data = outBytes
+                    }, loggedInUser);
+                }
+
+
+                    
+                    
+
                 
                 default:
                     responseMessage = $"ERR|Comando desconocido o no implementado: {frame.Command}";
@@ -934,7 +1185,8 @@ namespace Server
                 
                 token.ThrowIfCancellationRequested();
 
-                List<OnlineClass> classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();            int totalImages = classesWithImages.Count;
+                List<OnlineClass> classesWithImages = todayClasses.Where(c => !string.IsNullOrEmpty(c.Image)).ToList();            
+                int totalImages = classesWithImages.Count;
                 long totalSize = 0;
                 double avgSize = 0;
                 
@@ -1039,8 +1291,7 @@ namespace Server
             }
         }
         
-        private static void SeedData()
-        {
+        private static async Task SeedData()        {
             try
             {
                 Console.WriteLine("Seeding initial data...");
@@ -1053,6 +1304,13 @@ namespace Server
                 userRepo.Add(teo);
                 userRepo.Add(romi);
                 Console.WriteLine("Users created: pau, teo, romi");
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Info",
+                    Username = "System", // Usuario "Sistema"
+                    Action = "SeedData",
+                    Message = "Usuarios iniciales (pau, teo, romi) creados correctamente."
+                });
 
                 // --- 2. Creación de Clases (Generales) ---
                 var classPast = new OnlineClass("Clase 1 (Pasada)", "Intro a contenedores", 10, DateTimeOffset.Now.AddMonths(-1), 90, pau);
@@ -1076,15 +1334,21 @@ namespace Server
 
                 // Clase de hoy #2 (con inscripciones, con imagen)
                 var classToday2 = new OnlineClass("Taller de Redes (Hoy)", "Clase de hoy, con portada", 15, todayAfternoon, 90, pau);
-                classToday2.Image = "reporte_test_img.jpg"; // Asignamos un nombre de imagen
                 classRepo.Add(classToday2);
 
                 // Clase de hoy #3 (sin inscripciones, con imagen)
                 var classToday3 = new OnlineClass("Charla de C# (Hoy)", "Otra clase de hoy", 20, todayAfternoon.AddHours(2), 45, pau);
-                classToday3.Image = "reporte_test_img_2.jpg";
                 classRepo.Add(classToday3);
                 
                 Console.WriteLine("Classes for today's report created.");
+                
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Info",
+                    Username = "System",
+                    Action = "SeedData",
+                    Message = "Clases de prueba iniciales creadas."
+                });
 
                 // --- 4. Creación de Inscripciones (para clases de hoy y pasadas) ---
                 inscriptionRepo.Add(new Inscription(teo, classToday1));
@@ -1094,31 +1358,36 @@ namespace Server
                 
                 inscriptionRepo.Add(new Inscription(romi, classPast)); // 1 inscripto en una clase pasada
                 Console.WriteLine("Inscriptions for classes created.");
-
-                // --- 5. Creación de Archivos de Imagen Falsos (para el cálculo de tamaño) ---
-                try
+                
+                await LogPublisher.Publish(new LogMessageDTO
                 {
-                    string imagesPath = Path.Combine(AppContext.BaseDirectory, "ServerImages");
-                    Directory.CreateDirectory(imagesPath); // Asegura que la carpeta exista
-
-                    string filePath1 = Path.Combine(imagesPath, "reporte_test_img.jpg");
-                    File.WriteAllText(filePath1, "Este es un archivo de prueba con un tamaño."); // Crea un archivo con contenido
-
-                    string filePath2 = Path.Combine(imagesPath, "reporte_test_img_2.jpg");
-                    File.WriteAllText(filePath2, "Este es un segundo archivo de prueba, un poco más grande que el primero.");
-                    
-                    Console.WriteLine("Dummy image files for report created in ServerImages.");
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Error creating dummy image files: {e.Message}");
-                }
+                    Level = "Info",
+                    Username = "System",
+                    Action = "SeedData",
+                    Message = "Inscripciones a clases de prueba iniciales creadas."
+                });
 
                 Console.WriteLine("Data seeding finished successfully.");
+                
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Info",
+                    Username = "System",
+                    Action = "SeedData",
+                    Message = $"Datos de prueba generados satisfactoriamente."
+                });
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Error during data seeding: {e.Message}");
+                
+                await LogPublisher.Publish(new LogMessageDTO
+                {
+                    Level = "Error",
+                    Username = "System",
+                    Action = "SeedDataFailed",
+                    Message = $"Error crítico durante el SeedData: {e.Message}"
+                });
             }
         }
     }

@@ -26,12 +26,18 @@ public static class ProtocolConstants
     public const short CommandModifyClass = 15;
     public const short CommandDeleteClass = 16;
     public const short SearchAvailableClasses = 17;
-    public const short SearchClassesByNamwe = 18;
+    public const short SearchClassesByName = 18;
     public const short SearchClassesByDescription = 19;
     public const short SearchClassesByAvailabilty = 20;
    
     public const short CommandUploadImage = 30;
     public const short CommandDownloadImage = 31;
+    
+    // Para validacion de GRPC
+    public const short CommandValidateUser = 32;
+    public const short CommandValidateClassLink = 33;
+    public const short CommandValidateEnrollment = 34;
+
 
     public const int MaxFilePartSize = 32768;
     public const int FileNameLengthSize = 4;
