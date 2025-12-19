@@ -1,6 +1,6 @@
 # Distributed Class Manager Platform
-> **Academic Capstone Project** | Network Programming (Programación de Redes)  
-> **Universidad ORT Uruguay** | Semester: Aug 2025
+> **Academic Capstone Project** | Software Engineering Fundamentals (Fundamentos de Ingenieria de Software)  
+> **Universidad ORT Uruguay** | Semester: August 2024
 
 A distributed system designed to manage users and online classes, demonstrating the evolution from a monolithic TCP server to a microservices-inspired architecture.
 
